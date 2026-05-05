@@ -71,6 +71,34 @@ class _ParafixAppState extends State<ParafixApp> {
       isBuiltIn: true,
     ),
     ExpenseCategory(
+      id: 'rent',
+      name: 'Kira',
+      icon: Icons.home_work_rounded,
+      color: const Color(0xFF8A5A44),
+      isBuiltIn: true,
+    ),
+    ExpenseCategory(
+      id: 'health',
+      name: 'Sağlık',
+      icon: Icons.favorite_rounded,
+      color: const Color(0xFFCC5A71),
+      isBuiltIn: true,
+    ),
+    ExpenseCategory(
+      id: 'shopping',
+      name: 'Alışveriş',
+      icon: Icons.shopping_cart_rounded,
+      color: const Color(0xFFB35D8D),
+      isBuiltIn: true,
+    ),
+    ExpenseCategory(
+      id: 'entertainment',
+      name: 'Eğlence',
+      icon: Icons.theater_comedy_rounded,
+      color: const Color(0xFFDAA520),
+      isBuiltIn: true,
+    ),
+    ExpenseCategory(
       id: 'other',
       name: 'Diğer',
       icon: Icons.more_horiz_rounded,
@@ -91,20 +119,7 @@ class _ParafixAppState extends State<ParafixApp> {
     _pageController = PageController();
     _tabIndexNotifier = ValueNotifier(0);
     _selectedPreset = ParafixTheme.presets.first;
-    _customCategories = [
-      ExpenseCategory(
-        id: 'pet',
-        name: 'Evcil',
-        icon: Icons.pets_rounded,
-        color: const Color(0xFFB35D8D),
-      ),
-      ExpenseCategory(
-        id: 'health',
-        name: 'Sağlık',
-        icon: Icons.favorite_rounded,
-        color: const Color(0xFFCC5A71),
-      ),
-    ];
+    _customCategories = const [];
     _entriesNotifier = ValueNotifier(_seedEntries());
     _monthlyPaymentsNotifier = ValueNotifier(_seedMonthlyPayments());
     unawaited(_restorePersistedState());
@@ -293,7 +308,6 @@ class _ParafixAppState extends State<ParafixApp> {
           return AddExpenseSheet(
             scrollController: scrollController,
             categories: _allCategories,
-            recentCategoryIds: _recentCategoryIds(),
             initialEntry: entry == null
                 ? null
                 : ExpenseDraft(
@@ -357,7 +371,7 @@ class _ParafixAppState extends State<ParafixApp> {
             scrollController: scrollController,
             presets: ParafixTheme.presets,
             selectedPreset: _selectedPreset,
-            categories: _allCategories,
+            categories: _customCategories,
             customCount: _customCategories.length,
             onPresetSelected: _selectPreset,
           );
@@ -370,8 +384,8 @@ class _ParafixAppState extends State<ParafixApp> {
     }
 
     if (categoryResult.previousCategoryId == null &&
-        _customCategories.length >= 5) {
-      _showFeedback('En fazla 5 özel kategori ekleyebilirsin.');
+        _customCategories.length >= maxCustomExpenseCategories) {
+      _showFeedback('En fazla 3 özel kategori ekleyebilirsin.');
       return;
     }
 
@@ -451,22 +465,6 @@ class _ParafixAppState extends State<ParafixApp> {
         .where((entry) => entry.id != nextEntry.id)
         .toList(growable: false);
     return _insertEntrySorted(filtered, nextEntry);
-  }
-
-  List<String> _recentCategoryIds() {
-    final ids = <String>[];
-
-    for (final entry in _entriesNotifier.value) {
-      if (ids.contains(entry.category.id)) {
-        continue;
-      }
-      ids.add(entry.category.id);
-      if (ids.length == 3) {
-        break;
-      }
-    }
-
-    return ids;
   }
 
   void _upsertMonthlyPayment(MonthlyPayment nextPayment) {
@@ -567,13 +565,12 @@ class _ParafixAppState extends State<ParafixApp> {
 
     if (storedCustomCategories != null) {
       final decoded = jsonDecode(storedCustomCategories) as List<dynamic>;
-      nextCustomCategories = decoded
-          .map(
-            (item) => ExpenseCategory.fromJson(
-              Map<String, dynamic>.from(item as Map),
-            ),
-          )
-          .toList(growable: false);
+      nextCustomCategories = _normalizeCustomCategories(
+        decoded.map(
+          (item) =>
+              ExpenseCategory.fromJson(Map<String, dynamic>.from(item as Map)),
+        ),
+      );
     }
 
     if (storedEntries != null) {
@@ -681,6 +678,46 @@ class _ParafixAppState extends State<ParafixApp> {
             .toList(),
       ),
     );
+  }
+
+  List<ExpenseCategory> _normalizeCustomCategories(
+    Iterable<ExpenseCategory> categories,
+  ) {
+    final coreCategoryIds = _coreCategories
+        .map((category) => category.id)
+        .toSet();
+    final seenCategoryIds = <String>{};
+    final normalized = <ExpenseCategory>[];
+
+    for (final category in categories) {
+      if (coreCategoryIds.contains(category.id) ||
+          !seenCategoryIds.add(category.id)) {
+        continue;
+      }
+
+      normalized.add(
+        ExpenseCategory(
+          id: category.id,
+          name: _clampCustomCategoryName(category.name),
+          icon: category.icon,
+          color: category.color,
+        ),
+      );
+
+      if (normalized.length == maxCustomExpenseCategories) {
+        break;
+      }
+    }
+
+    return List<ExpenseCategory>.unmodifiable(normalized);
+  }
+
+  String _clampCustomCategoryName(String name) {
+    final trimmed = name.trim();
+    if (trimmed.length <= maxCustomCategoryNameLength) {
+      return trimmed;
+    }
+    return trimmed.substring(0, maxCustomCategoryNameLength);
   }
 
   bool _isScreenshotSeedEntries(List<ExpenseEntry> entries) {

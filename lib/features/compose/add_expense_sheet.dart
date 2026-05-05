@@ -8,13 +8,11 @@ class AddExpenseSheet extends StatefulWidget {
   const AddExpenseSheet({
     super.key,
     required this.categories,
-    this.recentCategoryIds = const [],
     this.initialEntry,
     this.scrollController,
   });
 
   final List<ExpenseCategory> categories;
-  final List<String> recentCategoryIds;
   final ExpenseDraft? initialEntry;
   final ScrollController? scrollController;
 
@@ -38,38 +36,7 @@ class _AddExpenseSheetState extends State<AddExpenseSheet> {
         amount > 0;
   }
 
-  List<ExpenseCategory> get _recentCategories {
-    if (widget.recentCategoryIds.isEmpty) {
-      return const [];
-    }
-
-    final recentCategories = widget.categories
-        .where((category) => widget.recentCategoryIds.contains(category.id))
-        .toList();
-
-    recentCategories.sort(
-      (left, right) => widget.recentCategoryIds
-          .indexOf(left.id)
-          .compareTo(widget.recentCategoryIds.indexOf(right.id)),
-    );
-
-    return recentCategories;
-  }
-
-  List<ExpenseCategory> get _remainingCategories {
-    if (widget.recentCategoryIds.isEmpty) {
-      return widget.categories;
-    }
-
-    final recentIds = widget.recentCategoryIds.toSet();
-    return widget.categories
-        .where((category) => !recentIds.contains(category.id))
-        .toList(growable: false);
-  }
-
-  List<ExpenseCategory> get _displayedCategories {
-    return [..._recentCategories, ..._remainingCategories];
-  }
+  List<ExpenseCategory> get _displayedCategories => widget.categories;
 
   @override
   void initState() {
@@ -98,6 +65,15 @@ class _AddExpenseSheetState extends State<AddExpenseSheet> {
   Widget build(BuildContext context) {
     final palette = Theme.of(context).extension<ParafixPalette>()!;
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+    final compactInputDecoration = InputDecorationTheme(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 15),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(20),
+        borderSide: BorderSide.none,
+      ),
+      filled: true,
+      fillColor: Color.lerp(palette.surfaceAlt, palette.surface, 0.42),
+    );
 
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
@@ -146,40 +122,52 @@ class _AddExpenseSheetState extends State<AddExpenseSheet> {
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                   const SizedBox(height: 20),
-                  TextFormField(
-                    controller: _amountController,
-                    keyboardType: TextInputType.number,
-                    textInputAction: TextInputAction.next,
-                    onFieldSubmitted: (_) => FocusScope.of(context).nextFocus(),
-                    inputFormatters: const [_AmountInputFormatter()],
-                    style: Theme.of(context).textTheme.headlineMedium,
-                    decoration: const InputDecoration(
-                      labelText: 'Tutar',
-                      hintText: '0',
+                  Theme(
+                    data: Theme.of(
+                      context,
+                    ).copyWith(inputDecorationTheme: compactInputDecoration),
+                    child: TextFormField(
+                      controller: _amountController,
+                      keyboardType: TextInputType.number,
+                      textInputAction: TextInputAction.next,
+                      onFieldSubmitted: (_) =>
+                          FocusScope.of(context).nextFocus(),
+                      inputFormatters: const [_AmountInputFormatter()],
+                      style: Theme.of(context).textTheme.headlineSmall,
+                      decoration: const InputDecoration(
+                        labelText: 'Tutar',
+                        hintText: '0',
+                      ),
+                      validator: (value) {
+                        final amount = int.tryParse(value ?? '');
+                        if (amount == null || amount <= 0) {
+                          return '0\'dan büyük bir tutar gir.';
+                        }
+                        return null;
+                      },
                     ),
-                    validator: (value) {
-                      final amount = int.tryParse(value ?? '');
-                      if (amount == null || amount <= 0) {
-                        return '0\'dan büyük bir tutar gir.';
-                      }
-                      return null;
-                    },
                   ),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    controller: _titleController,
-                    textInputAction: TextInputAction.next,
-                    onFieldSubmitted: (_) => FocusScope.of(context).nextFocus(),
-                    decoration: const InputDecoration(
-                      labelText: 'Başlık',
-                      hintText: 'Kahve, market, taksi...',
+                  const SizedBox(height: 10),
+                  Theme(
+                    data: Theme.of(
+                      context,
+                    ).copyWith(inputDecorationTheme: compactInputDecoration),
+                    child: TextFormField(
+                      controller: _titleController,
+                      textInputAction: TextInputAction.next,
+                      onFieldSubmitted: (_) =>
+                          FocusScope.of(context).nextFocus(),
+                      decoration: const InputDecoration(
+                        labelText: 'Başlık',
+                        hintText: 'Kahve, market, taksi...',
+                      ),
+                      validator: (value) {
+                        if ((value ?? '').trim().isEmpty) {
+                          return 'Kısa bir başlık gir.';
+                        }
+                        return null;
+                      },
                     ),
-                    validator: (value) {
-                      if ((value ?? '').trim().isEmpty) {
-                        return 'Kısa bir başlık gir.';
-                      }
-                      return null;
-                    },
                   ),
                   const SizedBox(height: 18),
                   Text(
@@ -187,72 +175,71 @@ class _AddExpenseSheetState extends State<AddExpenseSheet> {
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                   const SizedBox(height: 12),
-                  if (_recentCategories.isNotEmpty) ...[
-                    Text(
-                      'Son kullanılanlar',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                    const SizedBox(height: 10),
-                    Wrap(
-                      spacing: 10,
-                      runSpacing: 10,
-                      children: _recentCategories
-                          .map(
-                            (category) => _CategoryChip(
-                              category: category,
-                              selected: _selectedCategory.id == category.id,
-                              onSelected: () =>
-                                  setState(() => _selectedCategory = category),
-                            ),
-                          )
-                          .toList(),
-                    ),
-                    if (_remainingCategories.isNotEmpty) ...[
-                      const SizedBox(height: 14),
-                      Text(
-                        'Diğer kategoriler',
-                        style: Theme.of(context).textTheme.bodySmall,
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 9,
+                    children: _displayedCategories
+                        .map(
+                          (category) => _CategoryChip(
+                            category: category,
+                            selected: _selectedCategory.id == category.id,
+                            onSelected: () =>
+                                setState(() => _selectedCategory = category),
+                          ),
+                        )
+                        .toList(),
+                  ),
+                  const SizedBox(height: 14),
+                  Theme(
+                    data: Theme.of(
+                      context,
+                    ).copyWith(inputDecorationTheme: compactInputDecoration),
+                    child: TextFormField(
+                      controller: _noteController,
+                      minLines: 1,
+                      maxLines: 1,
+                      textInputAction: TextInputAction.done,
+                      decoration: const InputDecoration(
+                        labelText: 'Not',
+                        hintText: 'İstersen kısa bir not ekle.',
                       ),
-                      const SizedBox(height: 10),
-                    ],
-                  ],
-                  if (_remainingCategories.isNotEmpty ||
-                      _recentCategories.isEmpty)
-                    Wrap(
-                      spacing: 10,
-                      runSpacing: 10,
-                      children: _remainingCategories
-                          .map(
-                            (category) => _CategoryChip(
-                              category: category,
-                              selected: _selectedCategory.id == category.id,
-                              onSelected: () =>
-                                  setState(() => _selectedCategory = category),
-                            ),
-                          )
-                          .toList(),
-                    ),
-                  const SizedBox(height: 18),
-                  TextFormField(
-                    controller: _noteController,
-                    maxLines: 2,
-                    textInputAction: TextInputAction.done,
-                    decoration: const InputDecoration(
-                      labelText: 'Not',
-                      hintText: 'İstersen kısa bir açıklama ekle.',
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('Tarih'),
-                    subtitle: Text(_formatDate(_selectedDate)),
-                    trailing: IconButton.filledTonal(
-                      onPressed: _pickDate,
-                      icon: const Icon(Icons.calendar_month_rounded),
+                  const SizedBox(height: 10),
+                  InkWell(
+                    onTap: _pickDate,
+                    borderRadius: BorderRadius.circular(18),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
+                      ),
+                      decoration: BoxDecoration(
+                        color: palette.surfaceAlt.withValues(alpha: 0.58),
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                      child: Row(
+                        children: [
+                          Text(
+                            'Tarih',
+                            style: Theme.of(context).textTheme.titleSmall,
+                          ),
+                          const Spacer(),
+                          Text(
+                            _formatDate(_selectedDate),
+                            style: Theme.of(context).textTheme.bodyMedium,
+                          ),
+                          const SizedBox(width: 10),
+                          Icon(
+                            Icons.calendar_month_rounded,
+                            size: 20,
+                            color: palette.mutedText,
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 10),
                   SizedBox(
                     width: double.infinity,
                     child: ListenableBuilder(
@@ -371,13 +358,16 @@ class _CategoryChip extends StatelessWidget {
       label: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(category.icon, size: 18),
-          const SizedBox(width: 8),
+          Icon(category.icon, size: 17),
+          const SizedBox(width: 6),
           Text(category.name),
         ],
       ),
       selected: selected,
       onSelected: (_) => onSelected(),
+      labelPadding: const EdgeInsets.symmetric(horizontal: 4),
+      visualDensity: const VisualDensity(horizontal: -2, vertical: -2),
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
       selectedColor: category.color.withValues(alpha: 0.18),
       side: BorderSide.none,
     );

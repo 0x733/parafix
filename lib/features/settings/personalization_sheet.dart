@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../core/theme/parafix_theme.dart';
 import '../../models/expense_category.dart';
@@ -57,7 +58,8 @@ class _PersonalizationSheetState extends State<PersonalizationSheet> {
     final palette = Theme.of(context).extension<ParafixPalette>()!;
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
     final canSubmitCategory =
-        _editingCategory != null || widget.customCount < 5;
+        _editingCategory != null ||
+        widget.customCount < maxCustomExpenseCategories;
 
     return Container(
       decoration: BoxDecoration(
@@ -171,58 +173,54 @@ class _PersonalizationSheetState extends State<PersonalizationSheet> {
                 Row(
                   children: [
                     Text(
-                      'Kategoriler',
+                      'Özel kategoriler',
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
                     const Spacer(),
                     Text(
-                      '${widget.customCount}/5 özel kategori',
+                      '${widget.customCount}/$maxCustomExpenseCategories özel kategori',
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ],
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'En fazla 5 özel kategori ekleyebilirsin.',
+                  'En fazla 3 özel kategori ekleyebilirsin. Adlar 9 karakteri geçemez.',
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
                 const SizedBox(height: 12),
-                ...widget.categories.map(
-                  (category) => Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: InkWell(
-                      onTap: category.isBuiltIn
-                          ? null
-                          : () => _startEditingCategory(category),
-                      borderRadius: BorderRadius.circular(18),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 14,
-                          vertical: 12,
-                        ),
-                        decoration: BoxDecoration(
-                          color: palette.surfaceAlt.withValues(alpha: 0.48),
-                          borderRadius: BorderRadius.circular(18),
-                        ),
-                        child: Row(
-                          children: [
-                            Container(
-                              width: 38,
-                              height: 38,
-                              decoration: BoxDecoration(
-                                color: category.color.withValues(alpha: 0.16),
-                                borderRadius: BorderRadius.circular(12),
+                if (widget.categories.isNotEmpty) ...[
+                  ...widget.categories.map(
+                    (category) => Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: InkWell(
+                        onTap: () => _startEditingCategory(category),
+                        borderRadius: BorderRadius.circular(18),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 12,
+                          ),
+                          decoration: BoxDecoration(
+                            color: palette.surfaceAlt.withValues(alpha: 0.48),
+                            borderRadius: BorderRadius.circular(18),
+                          ),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 38,
+                                height: 38,
+                                decoration: BoxDecoration(
+                                  color: category.color.withValues(alpha: 0.16),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Icon(
+                                  category.icon,
+                                  color: category.color,
+                                ),
                               ),
-                              child: Icon(category.icon, color: category.color),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(child: Text(category.name)),
-                            if (category.isBuiltIn)
-                              Text(
-                                'Sabit',
-                                style: Theme.of(context).textTheme.bodySmall,
-                              )
-                            else
+                              const SizedBox(width: 12),
+                              Expanded(child: Text(category.name)),
                               Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
@@ -239,13 +237,14 @@ class _PersonalizationSheetState extends State<PersonalizationSheet> {
                                   ),
                                 ],
                               ),
-                          ],
+                            ],
+                          ),
                         ),
                       ),
                     ),
                   ),
-                ),
-                const SizedBox(height: 18),
+                  const SizedBox(height: 18),
+                ],
                 Text(
                   _editingCategory == null
                       ? 'Özel kategori ekle'
@@ -255,9 +254,16 @@ class _PersonalizationSheetState extends State<PersonalizationSheet> {
                 const SizedBox(height: 12),
                 TextField(
                   controller: _nameController,
+                  maxLength: maxCustomCategoryNameLength,
+                  inputFormatters: [
+                    LengthLimitingTextInputFormatter(
+                      maxCustomCategoryNameLength,
+                    ),
+                  ],
                   decoration: const InputDecoration(
                     labelText: 'Kategori adı',
                     hintText: 'Örnek: Hobi',
+                    counterText: '',
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -303,7 +309,7 @@ class _PersonalizationSheetState extends State<PersonalizationSheet> {
                 const SizedBox(height: 14),
                 if (!canSubmitCategory) ...[
                   Text(
-                    'Limit doldu. Yeni eklemek yerine mevcut bir kategoriyi düzenleyebilirsin.',
+                    'Limit doldu. Yeni eklemek yerine mevcut bir özel kategoriyi düzenleyebilirsin.',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                   const SizedBox(height: 10),
@@ -347,6 +353,15 @@ class _PersonalizationSheetState extends State<PersonalizationSheet> {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Kategoriye bir ad ver.')));
+      return;
+    }
+
+    if (name.length > maxCustomCategoryNameLength) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Kategori adı en fazla 9 karakter olabilir.'),
+        ),
+      );
       return;
     }
 

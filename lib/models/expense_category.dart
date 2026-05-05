@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+const maxCustomExpenseCategories = 3;
+const maxCustomCategoryNameLength = 9;
+
 class ExpenseCategory {
   const ExpenseCategory({
     required this.id,
