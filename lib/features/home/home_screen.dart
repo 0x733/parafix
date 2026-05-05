@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_slidable/flutter_slidable.dart';
 
 import '../../core/theme/parafix_theme.dart';
+import '../../models/expense_category.dart';
 import '../../models/expense_entry.dart';
 
 class HomeScreen extends StatelessWidget {
@@ -187,9 +188,23 @@ class HomeScreen extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 18),
-            Text(
-              'Son harcamalar',
-              style: Theme.of(context).textTheme.titleLarge,
+            Row(
+              children: [
+                Text(
+                  'Son harcamalar',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+                const Spacer(),
+                TextButton(
+                  onPressed: () => _openExpenseSearch(
+                    context,
+                    entries,
+                    onDeleteEntry,
+                    onEditEntry,
+                  ),
+                  child: const Text('Tümünü gör'),
+                ),
+              ],
             ),
             const SizedBox(height: 6),
             Text('Son 5 gün', style: Theme.of(context).textTheme.bodySmall),
@@ -301,6 +316,38 @@ class HomeScreen extends StatelessWidget {
             ),
           ],
         ],
+      ),
+    );
+  }
+
+  Future<void> _openExpenseSearch(
+    BuildContext context,
+    List<ExpenseEntry> sourceEntries,
+    ValueChanged<ExpenseEntry> onDeleteEntry,
+    Future<ExpenseEntry?> Function(ExpenseEntry) onEditEntry,
+  ) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.88,
+        minChildSize: 0.52,
+        maxChildSize: 0.95,
+        snap: true,
+        snapSizes: const [0.88],
+        shouldCloseOnMinExtent: true,
+        builder: (context, scrollController) {
+          return _ExpenseSearchSheet(
+            scrollController: scrollController,
+            entries: sourceEntries,
+            accentColor: accentColor,
+            onDeleteEntry: onDeleteEntry,
+            onEditEntry: onEditEntry,
+          );
+        },
       ),
     );
   }
@@ -540,6 +587,317 @@ class HomeScreen extends StatelessWidget {
             },
           );
         },
+      ),
+    );
+  }
+}
+
+class _ExpenseSearchSheet extends StatefulWidget {
+  const _ExpenseSearchSheet({
+    required this.scrollController,
+    required this.entries,
+    required this.accentColor,
+    required this.onDeleteEntry,
+    required this.onEditEntry,
+  });
+
+  final ScrollController scrollController;
+  final List<ExpenseEntry> entries;
+  final Color accentColor;
+  final ValueChanged<ExpenseEntry> onDeleteEntry;
+  final Future<ExpenseEntry?> Function(ExpenseEntry) onEditEntry;
+
+  @override
+  State<_ExpenseSearchSheet> createState() => _ExpenseSearchSheetState();
+}
+
+class _ExpenseSearchSheetState extends State<_ExpenseSearchSheet> {
+  late final TextEditingController _searchController;
+  late final List<ExpenseEntry> _sheetEntries;
+  var _selectedRange = _ExpenseSearchRange.all;
+  String? _selectedCategoryId;
+
+  @override
+  void initState() {
+    super.initState();
+    _searchController = TextEditingController();
+    _sheetEntries = [...widget.entries]
+      ..sort((left, right) => right.date.compareTo(left.date));
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = Theme.of(context).extension<ParafixPalette>()!;
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+    final now = DateTime.now();
+    final query = _normalizeSearchText(_searchController.text);
+    final categories = _categoriesFromEntries(_sheetEntries);
+    final effectiveCategoryId =
+        _selectedCategoryId != null &&
+            categories.any((category) => category.id == _selectedCategoryId)
+        ? _selectedCategoryId
+        : null;
+    final filteredEntries = _sheetEntries
+        .where(
+          (entry) =>
+              _matchesSearchRange(entry, _selectedRange, now) &&
+              (effectiveCategoryId == null ||
+                  entry.category.id == effectiveCategoryId) &&
+              _matchesSearchQuery(entry, query),
+        )
+        .toList(growable: false);
+    final filteredTotal = _sumFor(filteredEntries);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: palette.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
+      ),
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(20, 12, 20, bottomInset + 20),
+        child: ListView(
+          controller: widget.scrollController,
+          physics: parafixPlatformScrollPhysics(Theme.of(context).platform),
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          children: [
+            const SizedBox(height: 14),
+            Center(
+              child: Container(
+                width: 48,
+                height: 5,
+                decoration: BoxDecoration(
+                  color: palette.border,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+            ),
+            const SizedBox(height: 18),
+            Text(
+              'Harcamalar',
+              style: Theme.of(context).textTheme.headlineMedium,
+            ),
+            const SizedBox(height: 6),
+            Text(
+              '${filteredEntries.length} kayıt • ${_money(filteredTotal)}',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 18),
+            TextField(
+              controller: _searchController,
+              onChanged: (_) {
+                if (mounted) {
+                  setState(() {});
+                }
+              },
+              textInputAction: TextInputAction.search,
+              decoration: const InputDecoration(
+                labelText: 'Harcamalarda ara',
+                hintText: 'Başlık, kategori veya not',
+                prefixIcon: Icon(Icons.search_rounded),
+              ),
+            ),
+            const SizedBox(height: 14),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: _ExpenseSearchRange.values
+                  .map(
+                    (range) => ChoiceChip(
+                      label: Text(_searchRangeLabel(range)),
+                      selected: _selectedRange == range,
+                      onSelected: (_) => setState(() => _selectedRange = range),
+                    ),
+                  )
+                  .toList(),
+            ),
+            if (categories.isNotEmpty) ...[
+              const SizedBox(height: 18),
+              Text('Kategori', style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: categories
+                    .map(
+                      (category) => ChoiceChip(
+                        label: Text(category.name),
+                        selected: effectiveCategoryId == category.id,
+                        onSelected: (_) => setState(() {
+                          _selectedCategoryId =
+                              effectiveCategoryId == category.id
+                              ? null
+                              : category.id;
+                        }),
+                        selectedColor: category.color.withValues(alpha: 0.16),
+                        side: BorderSide.none,
+                      ),
+                    )
+                    .toList(),
+              ),
+            ],
+            const SizedBox(height: 18),
+            if (filteredEntries.isEmpty)
+              Container(
+                padding: const EdgeInsets.all(18),
+                decoration: BoxDecoration(
+                  color: palette.surfaceAlt.withValues(alpha: 0.48),
+                  borderRadius: BorderRadius.circular(22),
+                ),
+                child: Text(
+                  'Bu filtrelerle eşleşen harcama yok.',
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+              )
+            else
+              ...filteredEntries.map(
+                (entry) => Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: _ExpenseSearchResultTile(
+                    entry: entry,
+                    accentColor: widget.accentColor,
+                    onDelete: () => _deleteEntry(entry),
+                    onEdit: () => _editEntry(entry),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _deleteEntry(ExpenseEntry entry) {
+    FocusManager.instance.primaryFocus?.unfocus();
+    widget.onDeleteEntry(entry);
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _sheetEntries.removeWhere((item) => item.id == entry.id);
+    });
+  }
+
+  Future<void> _editEntry(ExpenseEntry entry) async {
+    FocusManager.instance.primaryFocus?.unfocus();
+    final updatedEntry = await widget.onEditEntry(entry);
+
+    if (!mounted || updatedEntry == null) {
+      return;
+    }
+
+    setState(() {
+      _sheetEntries.removeWhere((item) => item.id == entry.id);
+      _sheetEntries.add(updatedEntry);
+      _sheetEntries.sort((left, right) => right.date.compareTo(left.date));
+    });
+  }
+}
+
+class _ExpenseSearchResultTile extends StatelessWidget {
+  const _ExpenseSearchResultTile({
+    required this.entry,
+    required this.accentColor,
+    required this.onDelete,
+    required this.onEdit,
+  });
+
+  final ExpenseEntry entry;
+  final Color accentColor;
+  final VoidCallback onDelete;
+  final Future<void> Function() onEdit;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = Theme.of(context).extension<ParafixPalette>()!;
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: Slidable(
+        key: ValueKey('search-${entry.id}'),
+        endActionPane: ActionPane(
+          motion: const DrawerMotion(),
+          extentRatio: 0.26,
+          children: [
+            SlidableAction(
+              onPressed: (_) => onDelete(),
+              backgroundColor: const Color(0xFFC53D4A),
+              foregroundColor: Colors.white,
+              borderRadius: BorderRadius.circular(20),
+              icon: Icons.delete_outline_rounded,
+              label: 'Sil',
+            ),
+          ],
+        ),
+        child: Material(
+          color: palette.surfaceAlt.withValues(alpha: 0.45),
+          borderRadius: BorderRadius.circular(20),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(20),
+            onTap: onEdit,
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Row(
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: entry.category.color.withValues(alpha: 0.14),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Icon(
+                      entry.category.icon,
+                      color: entry.category.color,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(entry.title),
+                        const SizedBox(height: 2),
+                        Text(
+                          '${entry.category.name} • ${_longLabel(entry.date)} • ${_timeLabel(entry.date)}',
+                          style: Theme.of(context).textTheme.bodySmall,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        if ((entry.note ?? '').isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            entry.note!,
+                            style: Theme.of(context).textTheme.bodySmall,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Flexible(
+                    child: _ScaledText(
+                      text: _money(entry.amount),
+                      alignment: Alignment.centerRight,
+                      style: Theme.of(
+                        context,
+                      ).textTheme.titleMedium?.copyWith(color: accentColor),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -794,6 +1152,8 @@ class DailyPreviewGroup {
   final List<ExpenseEntry> previewEntries;
 }
 
+enum _ExpenseSearchRange { all, today, lastSevenDays, currentMonth }
+
 List<DailyTotal> _buildDailyTotals(List<ExpenseEntry> entries, int days) {
   final now = DateTime.now();
   final result = <DailyTotal>[];
@@ -816,6 +1176,70 @@ List<DailyTotal> _buildDailyTotals(List<ExpenseEntry> entries, int days) {
   }
 
   return result;
+}
+
+List<ExpenseCategory> _categoriesFromEntries(List<ExpenseEntry> entries) {
+  final seenCategoryIds = <String>{};
+  final categories = <ExpenseCategory>[];
+
+  for (final entry in entries) {
+    if (seenCategoryIds.add(entry.category.id)) {
+      categories.add(entry.category);
+    }
+  }
+
+  return categories;
+}
+
+bool _matchesSearchRange(
+  ExpenseEntry entry,
+  _ExpenseSearchRange range,
+  DateTime now,
+) {
+  final today = DateTime(now.year, now.month, now.day);
+  final entryDay = _atStartOfDay(entry.date);
+
+  return switch (range) {
+    _ExpenseSearchRange.all => true,
+    _ExpenseSearchRange.today => _sameDay(entry.date, now),
+    _ExpenseSearchRange.lastSevenDays => !entryDay.isBefore(
+      today.subtract(const Duration(days: 6)),
+    ),
+    _ExpenseSearchRange.currentMonth => !entry.date.isBefore(
+      DateTime(now.year, now.month),
+    ),
+  };
+}
+
+bool _matchesSearchQuery(ExpenseEntry entry, String query) {
+  if (query.isEmpty) {
+    return true;
+  }
+
+  final haystack = _normalizeSearchText(
+    '${entry.title} ${entry.category.name} ${entry.note ?? ''}',
+  );
+  return haystack.contains(query);
+}
+
+String _normalizeSearchText(String value) {
+  return value
+      .toLowerCase()
+      .replaceAll('ı', 'i')
+      .replaceAll('ç', 'c')
+      .replaceAll('ğ', 'g')
+      .replaceAll('ö', 'o')
+      .replaceAll('ş', 's')
+      .replaceAll('ü', 'u');
+}
+
+String _searchRangeLabel(_ExpenseSearchRange range) {
+  return switch (range) {
+    _ExpenseSearchRange.all => 'Tümü',
+    _ExpenseSearchRange.today => 'Bugün',
+    _ExpenseSearchRange.lastSevenDays => 'Son 7 gün',
+    _ExpenseSearchRange.currentMonth => 'Bu ay',
+  };
 }
 
 List<DailyPreviewGroup> _buildRecentPreviewGroups(

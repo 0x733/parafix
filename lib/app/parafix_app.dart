@@ -1,9 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/theme/parafix_theme.dart';
@@ -251,6 +254,8 @@ class _ParafixAppState extends State<ParafixApp> {
                   accentColor: _selectedPreset.accent,
                   onUpsertMonthlyPayment: _upsertMonthlyPayment,
                   onDeleteMonthlyPayment: _deleteMonthlyPayment,
+                  onDeleteEntry: _deleteEntry,
+                  onEditEntry: _editEntry,
                 ),
               );
             },
@@ -374,6 +379,9 @@ class _ParafixAppState extends State<ParafixApp> {
             categories: _customCategories,
             customCount: _customCategories.length,
             onPresetSelected: _selectPreset,
+            onExportExpenses: () => unawaited(_exportExpensesCsv()),
+            onExportMonthlyPayments: () =>
+                unawaited(_exportMonthlyPaymentsCsv()),
           );
         },
       ),
@@ -425,6 +433,136 @@ class _ParafixAppState extends State<ParafixApp> {
       }
     });
     unawaited(_persistState());
+  }
+
+  Future<void> _exportExpensesCsv() async {
+    final entries = _entriesNotifier.value;
+    if (entries.isEmpty) {
+      _showFeedback('Dışa aktarılacak harcama yok.');
+      return;
+    }
+
+    unawaited(HapticFeedback.selectionClick());
+
+    final rows = [
+      _csvRow(['Tarih', 'Saat', 'Başlık', 'Kategori', 'Tutar', 'Not']),
+      ...entries.map(
+        (entry) => _csvRow([
+          _formatExportDate(entry.date),
+          _formatExportTime(entry.date),
+          entry.title,
+          entry.category.name,
+          _formatExportAmount(entry.amount),
+          entry.note ?? '',
+        ]),
+      ),
+    ];
+
+    await _shareCsvFile(
+      fileName: 'parafix-harcamalar-${_formatFileDate(DateTime.now())}.csv',
+      content: rows.join('\n'),
+      title: 'Parafix harcamalar',
+      subject: 'Parafix harcama dışa aktarımı',
+      successMessage: 'Harcamalar dışa aktarıldı.',
+    );
+  }
+
+  Future<void> _exportMonthlyPaymentsCsv() async {
+    final payments = [..._monthlyPaymentsNotifier.value]
+      ..sort((a, b) {
+        final statusCompare = b.isActive.toString().compareTo(
+          a.isActive.toString(),
+        );
+        if (statusCompare != 0) {
+          return statusCompare;
+        }
+        final dayCompare = a.billingDay.compareTo(b.billingDay);
+        if (dayCompare != 0) {
+          return dayCompare;
+        }
+        return a.title.compareTo(b.title);
+      });
+
+    if (payments.isEmpty) {
+      _showFeedback('Dışa aktarılacak aylık ödeme yok.');
+      return;
+    }
+
+    unawaited(HapticFeedback.selectionClick());
+
+    final rows = [
+      _csvRow(['Başlık', 'Kategori', 'Tutar', 'Ödeme Günü', 'Durum', 'Not']),
+      ...payments.map(
+        (payment) => _csvRow([
+          payment.title,
+          payment.category.name,
+          _formatExportAmount(payment.amount),
+          payment.billingDay,
+          payment.isActive ? 'Aktif' : 'Pasif',
+          payment.note ?? '',
+        ]),
+      ),
+    ];
+
+    await _shareCsvFile(
+      fileName: 'parafix-aylik-odemeler-${_formatFileDate(DateTime.now())}.csv',
+      content: rows.join('\n'),
+      title: 'Parafix aylık ödemeler',
+      subject: 'Parafix aylık ödeme dışa aktarımı',
+      successMessage: 'Aylık ödemeler dışa aktarıldı.',
+    );
+  }
+
+  Future<void> _shareCsvFile({
+    required String fileName,
+    required String content,
+    required String title,
+    required String subject,
+    required String successMessage,
+  }) async {
+    try {
+      final directory = await getTemporaryDirectory();
+      final file = File('${directory.path}/$fileName');
+      await file.writeAsString('\ufeff$content', encoding: utf8);
+
+      final shareOrigin = _sharePositionOrigin();
+      final result = await SharePlus.instance.share(
+        ShareParams(
+          title: title,
+          subject: subject,
+          text: 'Parafix CSV dışa aktarımı',
+          files: [XFile(file.path, mimeType: 'text/csv')],
+          fileNameOverrides: [fileName],
+          sharePositionOrigin: shareOrigin,
+        ),
+      );
+
+      if (!mounted || result.status != ShareResultStatus.success) {
+        return;
+      }
+
+      _showFeedback(successMessage);
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+
+      _showFeedback('Dışa aktarma tamamlanamadı.');
+    }
+  }
+
+  Rect? _sharePositionOrigin() {
+    final currentContext = _navigatorKey.currentContext;
+    if (currentContext == null) {
+      return null;
+    }
+
+    final renderObject = currentContext.findRenderObject();
+    if (renderObject is! RenderBox || !renderObject.hasSize) {
+      return null;
+    }
+
+    return renderObject.localToGlobal(Offset.zero) & renderObject.size;
   }
 
   List<ExpenseEntry> _seedEntries() {
@@ -751,6 +889,40 @@ class _ParafixAppState extends State<ParafixApp> {
 
     return payments.isNotEmpty &&
         payments.every((payment) => seedPaymentIds.contains(payment.id));
+  }
+
+  String _csvRow(List<Object?> values) {
+    return values.map(_csvCell).join(',');
+  }
+
+  String _csvCell(Object? value) {
+    final text = (value ?? '').toString().replaceAll('"', '""');
+    return '"$text"';
+  }
+
+  String _formatExportDate(DateTime date) {
+    return '${date.day.toString().padLeft(2, '0')}.'
+        '${date.month.toString().padLeft(2, '0')}.'
+        '${date.year}';
+  }
+
+  String _formatExportTime(DateTime date) {
+    return '${date.hour.toString().padLeft(2, '0')}:'
+        '${date.minute.toString().padLeft(2, '0')}';
+  }
+
+  String _formatFileDate(DateTime date) {
+    return '${date.year}-'
+        '${date.month.toString().padLeft(2, '0')}-'
+        '${date.day.toString().padLeft(2, '0')}';
+  }
+
+  String _formatExportAmount(double amount) {
+    if (amount == amount.roundToDouble()) {
+      return amount.toStringAsFixed(0);
+    }
+
+    return amount.toStringAsFixed(2);
   }
 
   void _showFeedback(String message) {

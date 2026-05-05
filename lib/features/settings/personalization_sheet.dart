@@ -13,6 +13,8 @@ class PersonalizationSheet extends StatefulWidget {
     required this.categories,
     required this.customCount,
     required this.onPresetSelected,
+    required this.onExportExpenses,
+    required this.onExportMonthlyPayments,
   });
 
   final ScrollController? scrollController;
@@ -21,6 +23,8 @@ class PersonalizationSheet extends StatefulWidget {
   final List<ExpenseCategory> categories;
   final int customCount;
   final ValueChanged<ParafixThemePreset> onPresetSelected;
+  final VoidCallback onExportExpenses;
+  final VoidCallback onExportMonthlyPayments;
 
   @override
   State<PersonalizationSheet> createState() => _PersonalizationSheetState();
@@ -338,6 +342,27 @@ class _PersonalizationSheetState extends State<PersonalizationSheet> {
                     ),
                   ),
                 ],
+                const SizedBox(height: 26),
+                Text('Veriler', style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 4),
+                Text(
+                  'Kayıtlarını CSV dosyası olarak dışa aktarabilirsin.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                const SizedBox(height: 12),
+                _ExportActionTile(
+                  icon: Icons.receipt_long_rounded,
+                  title: 'Harcamaları dışa aktar',
+                  subtitle: 'Harcama geçmişini tablo dosyası olarak paylaş.',
+                  onTap: widget.onExportExpenses,
+                ),
+                const SizedBox(height: 10),
+                _ExportActionTile(
+                  icon: Icons.event_repeat_rounded,
+                  title: 'Aylık ödemeleri dışa aktar',
+                  subtitle: 'Abonelik ve düzenli ödeme listesini paylaş.',
+                  onTap: widget.onExportMonthlyPayments,
+                ),
               ],
             ),
           ],
@@ -396,6 +421,62 @@ class _PersonalizationSheetState extends State<PersonalizationSheet> {
       _selectedIcon = _icons.first;
       _selectedColor = _colors.first;
     });
+  }
+}
+
+class _ExportActionTile extends StatelessWidget {
+  const _ExportActionTile({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = Theme.of(context).extension<ParafixPalette>()!;
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(18),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+        decoration: BoxDecoration(
+          color: palette.surfaceAlt.withValues(alpha: 0.48),
+          borderRadius: BorderRadius.circular(18),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: palette.accent.withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(13),
+              ),
+              child: Icon(icon, color: palette.accent, size: 21),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: Theme.of(context).textTheme.titleSmall),
+                  const SizedBox(height: 3),
+                  Text(subtitle, style: Theme.of(context).textTheme.bodySmall),
+                ],
+              ),
+            ),
+            Icon(Icons.ios_share_rounded, size: 19, color: palette.mutedText),
+          ],
+        ),
+      ),
+    );
   }
 }
 

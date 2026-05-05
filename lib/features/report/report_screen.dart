@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_slidable/flutter_slidable.dart';
 
 import '../../core/theme/parafix_theme.dart';
 import '../../models/expense_category.dart';
@@ -17,6 +18,8 @@ class ReportScreen extends StatefulWidget {
     required this.accentColor,
     required this.onUpsertMonthlyPayment,
     required this.onDeleteMonthlyPayment,
+    required this.onDeleteEntry,
+    required this.onEditEntry,
   });
 
   final List<ExpenseEntry> entries;
@@ -25,6 +28,8 @@ class ReportScreen extends StatefulWidget {
   final Color accentColor;
   final ValueChanged<MonthlyPayment> onUpsertMonthlyPayment;
   final ValueChanged<String> onDeleteMonthlyPayment;
+  final ValueChanged<ExpenseEntry> onDeleteEntry;
+  final Future<ExpenseEntry?> Function(ExpenseEntry) onEditEntry;
 
   @override
   State<ReportScreen> createState() => _ReportScreenState();
@@ -47,19 +52,8 @@ class _ReportScreenState extends State<ReportScreen> {
     final filtered = _filterEntries(widget.entries, range.type, now);
     final buckets = _buildBuckets(filtered, range.type, now);
     final maxBucket = _maxBucket(buckets);
-    final totalsByCategory = <String, double>{};
-
-    for (final entry in filtered) {
-      totalsByCategory.update(
-        entry.category.name,
-        (value) => value + entry.amount,
-        ifAbsent: () => entry.amount,
-      );
-    }
-
-    final rankedCategories = totalsByCategory.entries.toList()
-      ..sort((a, b) => b.value.compareTo(a.value));
     final total = filtered.fold<double>(0, (sum, entry) => sum + entry.amount);
+    final rankedCategories = _buildCategoryBreakdowns(filtered);
     final average = filtered.isEmpty ? 0.0 : total / filtered.length;
     final activeMonthlyPayments = widget.monthlyPayments
         .where((payment) => payment.isActive)
@@ -230,38 +224,16 @@ class _ReportScreenState extends State<ReportScreen> {
                       .map(
                         (category) => Padding(
                           padding: const EdgeInsets.only(bottom: 14),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Expanded(child: Text(category.key)),
-                                  Flexible(
-                                    child: _ScaledReportText(
-                                      text: _money(category.value),
-                                      alignment: Alignment.centerRight,
-                                      style: Theme.of(
-                                        context,
-                                      ).textTheme.bodyMedium,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 8),
-                              ClipRRect(
-                                borderRadius: BorderRadius.circular(20),
-                                child: LinearProgressIndicator(
-                                  minHeight: 10,
-                                  backgroundColor: palette.surfaceAlt,
-                                  value: total == 0
-                                      ? 0
-                                      : category.value / total,
-                                  valueColor: AlwaysStoppedAnimation(
-                                    widget.accentColor,
-                                  ),
-                                ),
-                              ),
-                            ],
+                          child: _CategoryDistributionTile(
+                            category: category,
+                            rangeTotal: total,
+                            accentColor: widget.accentColor,
+                            onTap: () => _openCategoryDetails(
+                              context,
+                              category: category,
+                              range: range,
+                              rangeTotal: total,
+                            ),
                           ),
                         ),
                       ),
@@ -576,6 +548,244 @@ class _ReportScreenState extends State<ReportScreen> {
         break;
     }
   }
+
+  Future<void> _openCategoryDetails(
+    BuildContext context, {
+    required _CategoryBreakdown category,
+    required _ReportRange range,
+    required double rangeTotal,
+  }) async {
+    final palette = Theme.of(context).extension<ParafixPalette>()!;
+    final categoryInfo = category.category;
+    final categoryEntries = [...category.entries]
+      ..sort((left, right) => right.date.compareTo(left.date));
+    var currentRangeTotal = rangeTotal;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.86,
+        minChildSize: 0.52,
+        maxChildSize: 0.94,
+        snap: true,
+        snapSizes: const [0.86],
+        shouldCloseOnMinExtent: true,
+        builder: (context, scrollController) {
+          final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+
+          return StatefulBuilder(
+            builder: (context, setModalState) {
+              final categoryTotal = _sumFor(categoryEntries);
+              final categoryShare = currentRangeTotal == 0
+                  ? 0.0
+                  : categoryTotal / currentRangeTotal;
+              final categoryAverage = categoryEntries.isEmpty
+                  ? 0.0
+                  : categoryTotal / categoryEntries.length;
+
+              return Container(
+                decoration: BoxDecoration(
+                  color: palette.surface,
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(32),
+                  ),
+                ),
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(20, 12, 20, bottomInset + 20),
+                  child: ListView(
+                    controller: scrollController,
+                    physics: parafixPlatformScrollPhysics(
+                      Theme.of(context).platform,
+                    ),
+                    children: [
+                      const SizedBox(height: 14),
+                      Center(
+                        child: Container(
+                          width: 48,
+                          height: 5,
+                          decoration: BoxDecoration(
+                            color: palette.border,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 18),
+                      Row(
+                        children: [
+                          Container(
+                            width: 52,
+                            height: 52,
+                            decoration: BoxDecoration(
+                              color: categoryInfo.color.withValues(alpha: 0.14),
+                              borderRadius: BorderRadius.circular(18),
+                            ),
+                            child: Icon(
+                              categoryInfo.icon,
+                              color: categoryInfo.color,
+                              size: 28,
+                            ),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  categoryInfo.name,
+                                  style: Theme.of(
+                                    context,
+                                  ).textTheme.headlineMedium,
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  range.label,
+                                  style: Theme.of(context).textTheme.bodySmall,
+                                ),
+                              ],
+                            ),
+                          ),
+                          Flexible(
+                            child: _ScaledReportText(
+                              text: _money(categoryTotal),
+                              alignment: Alignment.centerRight,
+                              style: Theme.of(context).textTheme.titleLarge
+                                  ?.copyWith(color: widget.accentColor),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 18),
+                      Row(
+                        children: [
+                          _CategoryDetailMetric(
+                            label: 'Pay',
+                            value: '${(categoryShare * 100).round()}%',
+                          ),
+                          const SizedBox(width: 10),
+                          _CategoryDetailMetric(
+                            label: 'İşlem',
+                            value: categoryEntries.length.toString(),
+                          ),
+                          const SizedBox(width: 10),
+                          _CategoryDetailMetric(
+                            label: 'Ort.',
+                            value: _money(categoryAverage),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
+                        decoration: BoxDecoration(
+                          color: palette.surfaceAlt.withValues(alpha: 0.5),
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.touch_app_rounded,
+                              size: 18,
+                              color: widget.accentColor,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'Düzenlemek için dokun, silmek için sola kaydır.',
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 18),
+                      Text(
+                        'Harcamalar',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      const SizedBox(height: 12),
+                      ...categoryEntries.map(
+                        (entry) => Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: _CategoryExpenseTile(
+                            entry: entry,
+                            accentColor: widget.accentColor,
+                            onDelete: () {
+                              widget.onDeleteEntry(entry);
+                              setModalState(() {
+                                categoryEntries.removeWhere(
+                                  (item) => item.id == entry.id,
+                                );
+                                currentRangeTotal = math.max(
+                                  0,
+                                  currentRangeTotal - entry.amount,
+                                );
+                              });
+
+                              if (categoryEntries.isEmpty && context.mounted) {
+                                Navigator.of(context).pop();
+                              }
+                            },
+                            onEdit: () async {
+                              final updatedEntry = await widget.onEditEntry(
+                                entry,
+                              );
+                              if (updatedEntry == null || !context.mounted) {
+                                return;
+                              }
+
+                              final stillInRange = _filterEntries(
+                                [updatedEntry],
+                                range.type,
+                                DateTime.now(),
+                              ).isNotEmpty;
+
+                              setModalState(() {
+                                categoryEntries.removeWhere(
+                                  (item) => item.id == entry.id,
+                                );
+                                currentRangeTotal = math.max(
+                                  0,
+                                  currentRangeTotal - entry.amount,
+                                );
+
+                                if (stillInRange) {
+                                  currentRangeTotal += updatedEntry.amount;
+
+                                  if (updatedEntry.category.id ==
+                                      categoryInfo.id) {
+                                    categoryEntries.add(updatedEntry);
+                                    categoryEntries.sort(
+                                      (left, right) =>
+                                          right.date.compareTo(left.date),
+                                    );
+                                  }
+                                }
+                              });
+
+                              if (categoryEntries.isEmpty && context.mounted) {
+                                Navigator.of(context).pop();
+                              }
+                            },
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
 }
 
 class _ReportMetric extends StatelessWidget {
@@ -619,6 +829,217 @@ class _ReportMetric extends StatelessWidget {
   }
 }
 
+class _CategoryDistributionTile extends StatelessWidget {
+  const _CategoryDistributionTile({
+    required this.category,
+    required this.rangeTotal,
+    required this.accentColor,
+    required this.onTap,
+  });
+
+  final _CategoryBreakdown category;
+  final double rangeTotal;
+  final Color accentColor;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = Theme.of(context).extension<ParafixPalette>()!;
+    final progress = rangeTotal == 0 ? 0.0 : category.total / rangeTotal;
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(18),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    color: category.category.color.withValues(alpha: 0.14),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    category.category.icon,
+                    size: 18,
+                    color: category.category.color,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(child: Text(category.category.name)),
+                Flexible(
+                  child: _ScaledReportText(
+                    text: _money(category.total),
+                    alignment: Alignment.centerRight,
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Icon(
+                  Icons.chevron_right_rounded,
+                  size: 20,
+                  color: palette.mutedText,
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(20),
+              child: LinearProgressIndicator(
+                minHeight: 10,
+                backgroundColor: palette.surfaceAlt,
+                value: progress.clamp(0.0, 1.0).toDouble(),
+                valueColor: AlwaysStoppedAnimation(accentColor),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CategoryDetailMetric extends StatelessWidget {
+  const _CategoryDetailMetric({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = Theme.of(context).extension<ParafixPalette>()!;
+
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        decoration: BoxDecoration(
+          color: palette.surfaceAlt.withValues(alpha: 0.5),
+          borderRadius: BorderRadius.circular(18),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(label, style: Theme.of(context).textTheme.bodySmall),
+            const SizedBox(height: 4),
+            _ScaledReportText(
+              text: value,
+              alignment: Alignment.centerLeft,
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CategoryExpenseTile extends StatelessWidget {
+  const _CategoryExpenseTile({
+    required this.entry,
+    required this.accentColor,
+    required this.onDelete,
+    required this.onEdit,
+  });
+
+  final ExpenseEntry entry;
+  final Color accentColor;
+  final VoidCallback onDelete;
+  final Future<void> Function() onEdit;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = Theme.of(context).extension<ParafixPalette>()!;
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: Slidable(
+        key: ValueKey('report-category-${entry.id}'),
+        endActionPane: ActionPane(
+          motion: const DrawerMotion(),
+          extentRatio: 0.26,
+          children: [
+            SlidableAction(
+              onPressed: (_) => onDelete(),
+              backgroundColor: const Color(0xFFC53D4A),
+              foregroundColor: Colors.white,
+              borderRadius: BorderRadius.circular(20),
+              icon: Icons.delete_outline_rounded,
+              label: 'Sil',
+            ),
+          ],
+        ),
+        child: Material(
+          color: palette.surfaceAlt.withValues(alpha: 0.45),
+          borderRadius: BorderRadius.circular(20),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(20),
+            onTap: onEdit,
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Row(
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: entry.category.color.withValues(alpha: 0.14),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Icon(
+                      entry.category.icon,
+                      color: entry.category.color,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(entry.title),
+                        const SizedBox(height: 2),
+                        Text(
+                          '${_longDate(entry.date)} • ${_timeLabel(entry.date)}',
+                          style: Theme.of(context).textTheme.bodySmall,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        if ((entry.note ?? '').isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            entry.note!,
+                            style: Theme.of(context).textTheme.bodySmall,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Flexible(
+                    child: _ScaledReportText(
+                      text: _money(entry.amount),
+                      alignment: Alignment.centerRight,
+                      style: Theme.of(
+                        context,
+                      ).textTheme.titleMedium?.copyWith(color: accentColor),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _ScaledReportText extends StatelessWidget {
   const _ScaledReportText({
     required this.text,
@@ -638,6 +1059,18 @@ class _ScaledReportText extends StatelessWidget {
       child: Text(text, maxLines: 1, softWrap: false, style: style),
     );
   }
+}
+
+class _CategoryBreakdown {
+  const _CategoryBreakdown({
+    required this.category,
+    required this.entries,
+    required this.total,
+  });
+
+  final ExpenseCategory category;
+  final List<ExpenseEntry> entries;
+  final double total;
 }
 
 enum _RangeType { sevenDays, thirtyDays, currentMonth }
@@ -693,6 +1126,29 @@ List<ExpenseEntry> _filterEntries(
   }
 
   return entries.where((entry) => !entry.date.isBefore(start)).toList();
+}
+
+List<_CategoryBreakdown> _buildCategoryBreakdowns(List<ExpenseEntry> entries) {
+  final entriesByCategory = <String, List<ExpenseEntry>>{};
+
+  for (final entry in entries) {
+    entriesByCategory
+        .putIfAbsent(entry.category.id, () => <ExpenseEntry>[])
+        .add(entry);
+  }
+
+  final breakdowns = entriesByCategory.values.map((categoryEntries) {
+    final sortedEntries = [...categoryEntries]
+      ..sort((left, right) => right.date.compareTo(left.date));
+    return _CategoryBreakdown(
+      category: sortedEntries.first.category,
+      entries: List<ExpenseEntry>.unmodifiable(sortedEntries),
+      total: _sumFor(sortedEntries),
+    );
+  }).toList();
+
+  breakdowns.sort((left, right) => right.total.compareTo(left.total));
+  return breakdowns;
 }
 
 List<_Bucket> _buildBuckets(
@@ -812,6 +1268,10 @@ bool _sameDay(DateTime left, DateTime right) {
       left.day == right.day;
 }
 
+double _sumFor(Iterable<ExpenseEntry> entries) {
+  return entries.fold<double>(0, (sum, entry) => sum + entry.amount);
+}
+
 DateTime _atStartOfDay(DateTime value) {
   return DateTime(value.year, value.month, value.day);
 }
@@ -866,6 +1326,30 @@ String _shortDate(DateTime date) {
     'Ara',
   ];
   return '${date.day} ${months[date.month - 1]}';
+}
+
+String _longDate(DateTime date) {
+  const months = [
+    'Ocak',
+    'Şubat',
+    'Mart',
+    'Nisan',
+    'Mayıs',
+    'Haziran',
+    'Temmuz',
+    'Ağustos',
+    'Eylül',
+    'Ekim',
+    'Kasım',
+    'Aralık',
+  ];
+  return '${date.day} ${months[date.month - 1]}';
+}
+
+String _timeLabel(DateTime date) {
+  final hour = date.hour.toString().padLeft(2, '0');
+  final minute = date.minute.toString().padLeft(2, '0');
+  return '$hour:$minute';
 }
 
 String _money(double value) => '${_groupedWhole(value)}₺';
