@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 import 'package:flutter_slidable/flutter_slidable.dart';
 
@@ -24,29 +22,18 @@ class HomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final weekStart = today.subtract(const Duration(days: 6));
-    final todayTotal = _sumFor(
-      entries.where((entry) => _sameDay(entry.date, now)),
-    );
-    final weekTotal = _sumFor(
-      entries.where((entry) => !_atStartOfDay(entry.date).isBefore(weekStart)),
-    );
-    final monthTotal = _sumFor(
-      entries.where(
-        (entry) => !entry.date.isBefore(DateTime(now.year, now.month, 1)),
-      ),
-    );
-    final recentDays = _buildDailyTotals(entries, 7);
+    final todayEntries = entries
+        .where((entry) => _sameDay(entry.date, now))
+        .toList(growable: false);
+    final todayTotal = _sumFor(todayEntries);
+    final todayTopEntry = todayEntries.isEmpty
+        ? null
+        : todayEntries.reduce(
+            (left, right) => left.amount >= right.amount ? left : right,
+          );
+    final todayCategories = _buildCategoryTotals(todayEntries);
     final previewGroups = _buildRecentPreviewGroups(entries, 5);
     final activeDayAverage = _activeDayAverage(entries);
-    final weekAverage = recentDays.isEmpty
-        ? 0.0
-        : recentDays.fold<double>(0, (sum, item) => sum + item.total) /
-              recentDays.length;
-    final yesterdayTotal = recentDays.length > 1
-        ? recentDays[recentDays.length - 2].total
-        : 0.0;
 
     return SafeArea(
       child: ListView(
@@ -54,8 +41,8 @@ class HomeScreen extends StatelessWidget {
         children: [
           _SummaryHero(
             todayTotal: todayTotal,
-            weekTotal: weekTotal,
-            monthTotal: monthTotal,
+            todayEntryCount: todayEntries.length,
+            topEntry: todayTopEntry,
             accentColor: accentColor,
             dailyAverage: activeDayAverage,
           ),
@@ -82,110 +69,10 @@ class HomeScreen extends StatelessWidget {
             ),
           ] else ...[
             const SizedBox(height: 18),
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Text(
-                          '7 günlük akış',
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
-                        const Spacer(),
-                        Text(
-                          'Bugün dahil',
-                          style: Theme.of(context).textTheme.labelMedium
-                              ?.copyWith(
-                                color: accentColor,
-                                fontWeight: FontWeight.w700,
-                              ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 18),
-                    SizedBox(
-                      height: 140,
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: recentDays
-                            .map(
-                              (item) => Expanded(
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 4,
-                                  ),
-                                  child: Column(
-                                    mainAxisAlignment: MainAxisAlignment.end,
-                                    children: [
-                                      Text(
-                                        item.total == 0
-                                            ? '-'
-                                            : _shortAmount(item.total),
-                                        style: Theme.of(
-                                          context,
-                                        ).textTheme.bodySmall,
-                                      ),
-                                      const SizedBox(height: 10),
-                                      Container(
-                                        height: math.max(
-                                          12,
-                                          item.total == 0
-                                              ? 12
-                                              : (item.total /
-                                                            _maxTotal(
-                                                              recentDays,
-                                                            )) *
-                                                        72 +
-                                                    14,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: item.isToday
-                                              ? accentColor
-                                              : accentColor.withValues(
-                                                  alpha: 0.24,
-                                                ),
-                                          borderRadius: BorderRadius.circular(
-                                            14,
-                                          ),
-                                        ),
-                                      ),
-                                      const SizedBox(height: 8),
-                                      Text(
-                                        item.dayLabel,
-                                        style: Theme.of(
-                                          context,
-                                        ).textTheme.bodySmall,
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            )
-                            .toList(),
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    Row(
-                      children: [
-                        _StatPill(
-                          label: '7 gün ort.',
-                          value: _money(weekAverage),
-                        ),
-                        const SizedBox(width: 10),
-                        _StatPill(
-                          label: 'Düne göre',
-                          value: _differenceFromYesterdayLabel(
-                            todayTotal - yesterdayTotal,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
+            _TodayCategoryCard(
+              categories: todayCategories,
+              total: todayTotal,
+              accentColor: accentColor,
             ),
             const SizedBox(height: 18),
             Row(
@@ -906,23 +793,22 @@ class _ExpenseSearchResultTile extends StatelessWidget {
 class _SummaryHero extends StatelessWidget {
   const _SummaryHero({
     required this.todayTotal,
-    required this.weekTotal,
-    required this.monthTotal,
+    required this.todayEntryCount,
+    required this.topEntry,
     required this.accentColor,
     required this.dailyAverage,
   });
 
   final double todayTotal;
-  final double weekTotal;
-  final double monthTotal;
+  final int todayEntryCount;
+  final ExpenseEntry? topEntry;
   final Color accentColor;
   final double dailyAverage;
 
   static const double horizontalPadding = 24;
   static const double topBottomPadding = 24;
   static const double titleBottomGap = 8;
-  static const double metricsTopGap = 22;
-  static const double metricSidePadding = 18;
+  static const double metricsTopGap = 20;
   static const double averageTopGap = 4;
 
   @override
@@ -955,7 +841,7 @@ class _SummaryHero extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Bugün',
+                      'Bugünkü harcama',
                       style: Theme.of(
                         context,
                       ).textTheme.bodyMedium?.copyWith(color: heroMuted),
@@ -976,14 +862,14 @@ class _SummaryHero extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
                     Text(
-                      'Günlük ortalama',
+                      'Bugünkü işlem',
                       style: Theme.of(
                         context,
                       ).textTheme.bodySmall?.copyWith(color: heroMuted),
                     ),
                     const SizedBox(height: averageTopGap),
                     _ScaledText(
-                      text: _money(dailyAverage),
+                      text: '$todayEntryCount',
                       alignment: Alignment.centerRight,
                       style: Theme.of(context).textTheme.titleLarge?.copyWith(
                         color: heroForeground,
@@ -999,22 +885,20 @@ class _SummaryHero extends StatelessWidget {
           Row(
             children: [
               Expanded(
-                child: _MetricColumn(
-                  label: 'Son 7 gün',
-                  value: _money(weekTotal),
+                child: _HeroInfoPill(
+                  label: 'Günlük ortalama',
+                  value: _money(dailyAverage),
                   textColor: heroForeground,
                   mutedColor: heroMuted,
                 ),
               ),
-              Container(
-                width: 1,
-                height: 38,
-                color: heroForeground.withValues(alpha: 0.12),
-              ),
+              const SizedBox(width: 10),
               Expanded(
-                child: _MetricColumn(
-                  label: 'Bu ay',
-                  value: _money(monthTotal),
+                child: _HeroInfoPill(
+                  label: 'En büyük',
+                  value: topEntry == null
+                      ? 'Yok'
+                      : '${topEntry!.title} · ${_money(topEntry!.amount)}',
                   textColor: heroForeground,
                   mutedColor: heroMuted,
                 ),
@@ -1027,8 +911,8 @@ class _SummaryHero extends StatelessWidget {
   }
 }
 
-class _MetricColumn extends StatelessWidget {
-  const _MetricColumn({
+class _HeroInfoPill extends StatelessWidget {
+  const _HeroInfoPill({
     required this.label,
     required this.value,
     required this.textColor,
@@ -1043,9 +927,7 @@ class _MetricColumn extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(
-        horizontal: _SummaryHero.metricSidePadding,
-      ),
+      padding: const EdgeInsets.symmetric(vertical: 2),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1061,7 +943,7 @@ class _MetricColumn extends StatelessWidget {
             alignment: Alignment.centerLeft,
             style: Theme.of(
               context,
-            ).textTheme.titleLarge?.copyWith(color: textColor),
+            ).textTheme.titleMedium?.copyWith(color: textColor),
           ),
         ],
       ),
@@ -1069,36 +951,131 @@ class _MetricColumn extends StatelessWidget {
   }
 }
 
-class _StatPill extends StatelessWidget {
-  const _StatPill({required this.label, required this.value});
+class _TodayCategoryCard extends StatelessWidget {
+  const _TodayCategoryCard({
+    required this.categories,
+    required this.total,
+    required this.accentColor,
+  });
 
-  final String label;
-  final String value;
+  final List<CategoryTotal> categories;
+  final double total;
+  final Color accentColor;
 
   @override
   Widget build(BuildContext context) {
     final palette = Theme.of(context).extension<ParafixPalette>()!;
 
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        decoration: BoxDecoration(
-          color: palette.surfaceAlt.withValues(alpha: 0.55),
-          borderRadius: BorderRadius.circular(18),
-        ),
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(label, style: Theme.of(context).textTheme.bodySmall),
-            const SizedBox(height: 4),
-            _ScaledText(
-              text: value,
-              alignment: Alignment.centerLeft,
-              style: Theme.of(context).textTheme.titleMedium,
+            Row(
+              children: [
+                Text(
+                  'Bugünün dağılımı',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const Spacer(),
+                Text(
+                  'Bugün',
+                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    color: accentColor,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
             ),
+            const SizedBox(height: 16),
+            if (categories.isEmpty)
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: palette.surfaceAlt.withValues(alpha: 0.50),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  'Bugün henüz harcama yok.',
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+              )
+            else
+              ...categories
+                  .take(4)
+                  .map(
+                    (item) => Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: _TodayCategoryRow(
+                        item: item,
+                        total: total,
+                        accentColor: accentColor,
+                      ),
+                    ),
+                  ),
           ],
         ),
       ),
+    );
+  }
+}
+
+class _TodayCategoryRow extends StatelessWidget {
+  const _TodayCategoryRow({
+    required this.item,
+    required this.total,
+    required this.accentColor,
+  });
+
+  final CategoryTotal item;
+  final double total;
+  final Color accentColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = Theme.of(context).extension<ParafixPalette>()!;
+    final progress = total == 0 ? 0.0 : item.total / total;
+
+    return Column(
+      children: [
+        Row(
+          children: [
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: item.category.color.withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(13),
+              ),
+              child: Icon(
+                item.category.icon,
+                size: 20,
+                color: item.category.color,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(child: Text(item.category.name)),
+            Flexible(
+              child: _ScaledText(
+                text: _money(item.total),
+                alignment: Alignment.centerRight,
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(999),
+          child: LinearProgressIndicator(
+            minHeight: 8,
+            backgroundColor: palette.surfaceAlt,
+            value: progress.clamp(0.0, 1.0).toDouble(),
+            valueColor: AlwaysStoppedAnimation(accentColor),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -1124,18 +1101,6 @@ class _ScaledText extends StatelessWidget {
   }
 }
 
-class DailyTotal {
-  const DailyTotal({
-    required this.dayLabel,
-    required this.total,
-    required this.isToday,
-  });
-
-  final String dayLabel;
-  final double total;
-  final bool isToday;
-}
-
 class DailyPreviewGroup {
   const DailyPreviewGroup({
     required this.day,
@@ -1152,31 +1117,14 @@ class DailyPreviewGroup {
   final List<ExpenseEntry> previewEntries;
 }
 
-enum _ExpenseSearchRange { all, today, lastSevenDays, currentMonth }
+class CategoryTotal {
+  const CategoryTotal({required this.category, required this.total});
 
-List<DailyTotal> _buildDailyTotals(List<ExpenseEntry> entries, int days) {
-  final now = DateTime.now();
-  final result = <DailyTotal>[];
-
-  for (var i = days - 1; i >= 0; i--) {
-    final day = DateTime(
-      now.year,
-      now.month,
-      now.day,
-    ).subtract(Duration(days: i));
-    final total = _sumFor(entries.where((entry) => _sameDay(entry.date, day)));
-
-    result.add(
-      DailyTotal(
-        dayLabel: _dayLabel(day.weekday),
-        total: total,
-        isToday: _sameDay(day, now),
-      ),
-    );
-  }
-
-  return result;
+  final ExpenseCategory category;
+  final double total;
 }
+
+enum _ExpenseSearchRange { all, today, lastSevenDays, currentMonth }
 
 List<ExpenseCategory> _categoriesFromEntries(List<ExpenseEntry> entries) {
   final seenCategoryIds = <String>{};
@@ -1295,11 +1243,30 @@ List<DailyPreviewGroup> _buildRecentPreviewGroups(
   return groups.take(dayCount).toList(growable: false);
 }
 
-double _maxTotal(List<DailyTotal> items) {
-  return items.fold<double>(
-    1,
-    (maxValue, item) => math.max(maxValue, item.total),
-  );
+List<CategoryTotal> _buildCategoryTotals(List<ExpenseEntry> entries) {
+  final totalsByCategory = <String, double>{};
+  final categoriesById = <String, ExpenseCategory>{};
+
+  for (final entry in entries) {
+    categoriesById[entry.category.id] = entry.category;
+    totalsByCategory.update(
+      entry.category.id,
+      (value) => value + entry.amount,
+      ifAbsent: () => entry.amount,
+    );
+  }
+
+  final totals = totalsByCategory.entries
+      .map(
+        (entry) => CategoryTotal(
+          category: categoriesById[entry.key]!,
+          total: entry.value,
+        ),
+      )
+      .toList();
+
+  totals.sort((left, right) => right.total.compareTo(left.total));
+  return totals;
 }
 
 double _sumFor(Iterable<ExpenseEntry> entries) {
@@ -1338,24 +1305,6 @@ bool _sameDay(DateTime left, DateTime right) {
 }
 
 String _money(double value) => '${_groupedWhole(value)}₺';
-
-String _shortAmount(double value) => value >= 1000
-    ? '${(value / 1000).toStringAsFixed(1)}k'
-    : _groupedWhole(value);
-
-String _differenceFromYesterdayLabel(double value) {
-  if (value == 0) {
-    return 'Aynı';
-  }
-
-  final direction = value < 0 ? 'daha az' : 'daha fazla';
-  return '${_groupedWhole(value.abs())}₺ $direction';
-}
-
-String _dayLabel(int weekday) {
-  const labels = ['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz'];
-  return labels[weekday - 1];
-}
 
 String _longLabel(DateTime day) {
   const months = [

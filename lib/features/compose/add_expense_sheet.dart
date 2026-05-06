@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../core/theme/parafix_theme.dart';
 import '../../models/expense_category.dart';
+import '../../services/receipt_scan_service.dart';
 
 class AddExpenseSheet extends StatefulWidget {
   const AddExpenseSheet({
@@ -25,9 +27,13 @@ class _AddExpenseSheetState extends State<AddExpenseSheet> {
   final _titleController = TextEditingController();
   final _amountController = TextEditingController();
   final _noteController = TextEditingController();
+  final _receiptScanService = ReceiptScanService();
 
   late ExpenseCategory _selectedCategory;
   DateTime _selectedDate = DateTime.now();
+  String? _receiptScanMessage;
+  var _receiptScanSucceeded = false;
+  var _isScanningReceipt = false;
 
   bool get _isFormValid {
     final amount = int.tryParse(_amountController.text);
@@ -108,11 +114,45 @@ class _AddExpenseSheetState extends State<AddExpenseSheet> {
                     ),
                   ),
                   const SizedBox(height: 18),
-                  Text(
-                    widget.initialEntry == null
-                        ? 'Yeni harcama'
-                        : 'Harcamayı düzenle',
-                    style: Theme.of(context).textTheme.headlineMedium,
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          widget.initialEntry == null
+                              ? 'Yeni harcama'
+                              : 'Harcamayı düzenle',
+                          style: Theme.of(context).textTheme.headlineMedium,
+                        ),
+                      ),
+                      if (widget.initialEntry == null) ...[
+                        const SizedBox(width: 12),
+                        FilledButton.tonalIcon(
+                          onPressed: _isScanningReceipt
+                              ? null
+                              : _openReceiptScanOptions,
+                          icon: _isScanningReceipt
+                              ? const SizedBox.square(
+                                  dimension: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.document_scanner_rounded),
+                          label: const Text('Fiş tara'),
+                          style: FilledButton.styleFrom(
+                            visualDensity: const VisualDensity(
+                              horizontal: -2,
+                              vertical: -2,
+                            ),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 10,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                   const SizedBox(height: 6),
                   Text(
@@ -121,6 +161,13 @@ class _AddExpenseSheetState extends State<AddExpenseSheet> {
                         : 'Bilgileri güncelle.',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
+                  if (_receiptScanMessage != null) ...[
+                    const SizedBox(height: 12),
+                    _ReceiptScanMessage(
+                      message: _receiptScanMessage!,
+                      succeeded: _receiptScanSucceeded,
+                    ),
+                  ],
                   const SizedBox(height: 20),
                   Theme(
                     data: Theme.of(
@@ -287,6 +334,99 @@ class _AddExpenseSheetState extends State<AddExpenseSheet> {
     }
   }
 
+  Future<void> _openReceiptScanOptions() async {
+    FocusManager.instance.primaryFocus?.unfocus();
+
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => const _ReceiptScanSourceSheet(),
+    );
+
+    if (source == null || !mounted) {
+      return;
+    }
+
+    await _scanReceipt(source);
+  }
+
+  Future<void> _scanReceipt(ImageSource source) async {
+    setState(() {
+      _isScanningReceipt = true;
+      _receiptScanMessage = 'Fiş okunuyor...';
+      _receiptScanSucceeded = true;
+    });
+
+    try {
+      final result = await _receiptScanService.scanFromSource(
+        source: source,
+        categories: _displayedCategories,
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      if (result == null) {
+        setState(() {
+          _isScanningReceipt = false;
+          _receiptScanMessage = null;
+        });
+        return;
+      }
+
+      if (!result.hasAnySuggestion) {
+        setState(() {
+          _isScanningReceipt = false;
+          _receiptScanSucceeded = false;
+          _receiptScanMessage = 'Fiş okunamadı. Bilgileri elle girebilirsin.';
+        });
+        return;
+      }
+
+      setState(() {
+        _applyReceiptScanResult(result);
+        _isScanningReceipt = false;
+        _receiptScanSucceeded = true;
+        _receiptScanMessage = 'Fiş okundu. Bilgileri kontrol et.';
+      });
+
+      _formKey.currentState?.validate();
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _isScanningReceipt = false;
+        _receiptScanSucceeded = false;
+        _receiptScanMessage = 'Fiş okunamadı. Bilgileri elle girebilirsin.';
+      });
+    }
+  }
+
+  void _applyReceiptScanResult(ReceiptScanResult result) {
+    final amount = result.amount;
+    if (amount != null && amount > 0) {
+      _amountController.text = amount.round().toString();
+    }
+
+    final title = result.title;
+    if (title != null && title.trim().isNotEmpty) {
+      _titleController.text = title.trim();
+    }
+
+    final category = result.category;
+    if (category != null) {
+      _selectedCategory = category;
+    }
+
+    final date = result.date;
+    if (date != null) {
+      _selectedDate = date;
+    }
+  }
+
   void _submit() {
     if (!_formKey.currentState!.validate()) {
       return;
@@ -322,6 +462,147 @@ class _AmountInputFormatter extends TextInputFormatter {
       return newValue;
     }
     return oldValue;
+  }
+}
+
+class _ReceiptScanMessage extends StatelessWidget {
+  const _ReceiptScanMessage({required this.message, required this.succeeded});
+
+  final String message;
+  final bool succeeded;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = Theme.of(context).extension<ParafixPalette>()!;
+    final color = succeeded ? palette.accent : const Color(0xFFC53D4A);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            succeeded ? Icons.check_circle_rounded : Icons.info_outline_rounded,
+            size: 18,
+            color: color,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(message, style: Theme.of(context).textTheme.bodySmall),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ReceiptScanSourceSheet extends StatelessWidget {
+  const _ReceiptScanSourceSheet();
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = Theme.of(context).extension<ParafixPalette>()!;
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: palette.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      padding: EdgeInsets.fromLTRB(20, 12, 20, bottomInset + 18),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: Container(
+              width: 48,
+              height: 5,
+              decoration: BoxDecoration(
+                color: palette.border,
+                borderRadius: BorderRadius.circular(999),
+              ),
+            ),
+          ),
+          const SizedBox(height: 18),
+          Text(
+            'Fişten harcama ekle',
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Fotoğrafı seç, alanları otomatik dolduralım.',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 16),
+          _ReceiptScanSourceTile(
+            icon: Icons.photo_camera_rounded,
+            title: 'Fotoğraf çek',
+            onTap: () => Navigator.of(context).pop(ImageSource.camera),
+          ),
+          const SizedBox(height: 10),
+          _ReceiptScanSourceTile(
+            icon: Icons.photo_library_rounded,
+            title: 'Galeriden seç',
+            onTap: () => Navigator.of(context).pop(ImageSource.gallery),
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Vazgeç'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ReceiptScanSourceTile extends StatelessWidget {
+  const _ReceiptScanSourceTile({
+    required this.icon,
+    required this.title,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String title;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = Theme.of(context).extension<ParafixPalette>()!;
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(18),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        decoration: BoxDecoration(
+          color: palette.surfaceAlt.withValues(alpha: 0.50),
+          borderRadius: BorderRadius.circular(18),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: palette.accent),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(title, style: Theme.of(context).textTheme.titleSmall),
+            ),
+            Icon(
+              Icons.chevron_right_rounded,
+              size: 20,
+              color: palette.mutedText,
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

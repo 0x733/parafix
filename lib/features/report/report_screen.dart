@@ -36,7 +36,7 @@ class ReportScreen extends StatefulWidget {
 }
 
 class _ReportScreenState extends State<ReportScreen> {
-  int _selectedRange = 1;
+  int _selectedRange = 0;
 
   static const _ranges = [
     _ReportRange(label: 'Son 7 Gün', type: _RangeType.sevenDays),

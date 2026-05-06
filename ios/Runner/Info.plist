@@ -26,6 +26,10 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>Fiş fotoğrafı çekerek harcama bilgilerini otomatik doldurmak için kamera kullanılır.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Fiş fotoğrafı seçerek harcama bilgilerini otomatik doldurmak için fotoğraf arşivi kullanılır.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
