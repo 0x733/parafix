@@ -18,6 +18,7 @@ import '../features/settings/personalization_sheet.dart';
 import '../models/expense_category.dart';
 import '../models/expense_entry.dart';
 import '../models/monthly_payment.dart';
+import '../services/notification_service.dart';
 
 const _appIconAssetPath =
     'ios/Runner/Assets.xcassets/AppIcon.appiconset/Icon-App-60x60@3x.png';
@@ -34,13 +35,20 @@ class _ParafixAppState extends State<ParafixApp> {
   static const _customCategoriesStorageKey = 'parafix_custom_categories_v1';
   static const _entriesStorageKey = 'parafix_entries_v1';
   static const _monthlyPaymentsStorageKey = 'parafix_monthly_payments_v1';
+  static const _dailyLimitStorageKey = 'parafix_daily_limit_v1';
+  static const _dailyLimitAlertDateStorageKey =
+      'parafix_daily_limit_alert_date_v1';
+  static const _dailyLimitAlertLevelStorageKey =
+      'parafix_daily_limit_alert_level_v1';
   static const _onboardingStorageKey = 'parafix_has_seen_onboarding_v1';
 
   final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
   late final PageController _pageController;
   late final ValueNotifier<List<ExpenseEntry>> _entriesNotifier;
   late final ValueNotifier<List<MonthlyPayment>> _monthlyPaymentsNotifier;
+  late final ValueNotifier<double?> _dailyLimitNotifier;
   late final ValueNotifier<int> _tabIndexNotifier;
+  late final ParafixNotificationService _notificationService;
   OverlayEntry? _feedbackEntry;
   Timer? _feedbackTimer;
 
@@ -125,6 +133,9 @@ class _ParafixAppState extends State<ParafixApp> {
     _customCategories = const [];
     _entriesNotifier = ValueNotifier(_seedEntries());
     _monthlyPaymentsNotifier = ValueNotifier(_seedMonthlyPayments());
+    _dailyLimitNotifier = ValueNotifier(null);
+    _notificationService = ParafixNotificationService();
+    unawaited(_notificationService.initialize());
     unawaited(_restorePersistedState());
   }
 
@@ -140,6 +151,7 @@ class _ParafixAppState extends State<ParafixApp> {
     _pageController.dispose();
     _entriesNotifier.dispose();
     _monthlyPaymentsNotifier.dispose();
+    _dailyLimitNotifier.dispose();
     _tabIndexNotifier.dispose();
     super.dispose();
   }
@@ -225,13 +237,17 @@ class _ParafixAppState extends State<ParafixApp> {
         controller: _pageController,
         onPageChanged: (index) => _tabIndexNotifier.value = index,
         children: [
-          ValueListenableBuilder<List<ExpenseEntry>>(
-            valueListenable: _entriesNotifier,
-            builder: (context, entries, _) {
+          ListenableBuilder(
+            listenable: Listenable.merge([
+              _entriesNotifier,
+              _dailyLimitNotifier,
+            ]),
+            builder: (context, _) {
               return RepaintBoundary(
                 child: HomeScreen(
                   key: const PageStorageKey('home-screen'),
-                  entries: entries,
+                  entries: _entriesNotifier.value,
+                  dailyLimit: _dailyLimitNotifier.value,
                   accentColor: _selectedPreset.accent,
                   onDeleteEntry: _deleteEntry,
                   onEditEntry: _editEntry,
@@ -348,6 +364,7 @@ class _ParafixAppState extends State<ParafixApp> {
     unawaited(HapticFeedback.lightImpact());
 
     _showFeedback(isEditing ? 'Harcama güncellendi.' : 'Harcama eklendi.');
+    unawaited(_syncDailyLimitAlert());
 
     return nextEntry;
   }
@@ -378,7 +395,9 @@ class _ParafixAppState extends State<ParafixApp> {
             selectedPreset: _selectedPreset,
             categories: _customCategories,
             customCount: _customCategories.length,
+            dailyLimit: _dailyLimitNotifier.value,
             onPresetSelected: _selectPreset,
+            onDailyLimitChanged: _setDailyLimit,
             onExportExpenses: () => unawaited(_exportExpensesCsv()),
             onExportMonthlyPayments: () =>
                 unawaited(_exportMonthlyPaymentsCsv()),
@@ -433,6 +452,12 @@ class _ParafixAppState extends State<ParafixApp> {
       }
     });
     unawaited(_persistState());
+    unawaited(
+      _notificationService.scheduleMonthlyPayments(
+        _monthlyPaymentsNotifier.value,
+        requestPermission: false,
+      ),
+    );
   }
 
   Future<void> _exportExpensesCsv() async {
@@ -614,6 +639,7 @@ class _ParafixAppState extends State<ParafixApp> {
       nextPayment,
     );
     unawaited(_persistState());
+    unawaited(_notificationService.scheduleMonthlyPayment(nextPayment));
     unawaited(HapticFeedback.lightImpact());
     _showFeedback(
       isEditing ? 'Aylık ödeme güncellendi.' : 'Aylık ödeme eklendi.',
@@ -636,6 +662,7 @@ class _ParafixAppState extends State<ParafixApp> {
         .where((payment) => payment.id != id)
         .toList(growable: false);
     unawaited(_persistState());
+    unawaited(_notificationService.cancelMonthlyPayment(id));
     unawaited(HapticFeedback.mediumImpact());
     _showFeedback('Aylık ödeme silindi.');
   }
@@ -659,6 +686,7 @@ class _ParafixAppState extends State<ParafixApp> {
     unawaited(_persistState());
     unawaited(HapticFeedback.mediumImpact());
     _showFeedback('Harcama silindi.');
+    unawaited(_syncDailyLimitAlert());
   }
 
   void _selectPreset(ParafixThemePreset preset) {
@@ -671,6 +699,84 @@ class _ParafixAppState extends State<ParafixApp> {
     unawaited(_persistState());
   }
 
+  void _setDailyLimit(double? limit) {
+    _dailyLimitNotifier.value = limit;
+    unawaited(_resetDailyLimitAlert());
+    unawaited(_persistState());
+
+    if (limit == null) {
+      unawaited(_notificationService.cancelDailyLimitAlerts());
+      _showFeedback('Günlük limit kapatıldı.');
+      return;
+    }
+
+    unawaited(_notificationService.requestPermissionIfNeeded());
+    unawaited(_syncDailyLimitAlert());
+    _showFeedback('Günlük limit kaydedildi.');
+  }
+
+  Future<void> _syncDailyLimitAlert() async {
+    final limit = _dailyLimitNotifier.value;
+    final now = DateTime.now();
+    if (limit == null || limit <= 0) {
+      return;
+    }
+
+    final todayTotal = _entriesNotifier.value
+        .where((entry) => _sameDay(entry.date, now))
+        .fold<double>(0, (sum, entry) => sum + entry.amount);
+    final alertLevel = todayTotal >= limit
+        ? DailyLimitAlertLevel.exceeded
+        : todayTotal >= limit * 0.8
+        ? DailyLimitAlertLevel.eightyPercent
+        : null;
+    final preferences = await SharedPreferences.getInstance();
+    final todayKey = _dateKey(now);
+    final storedDay = preferences.getString(_dailyLimitAlertDateStorageKey);
+    final storedLevel = storedDay == todayKey
+        ? preferences.getInt(_dailyLimitAlertLevelStorageKey) ?? 0
+        : 0;
+
+    if (alertLevel == null) {
+      if (storedDay == todayKey) {
+        await _resetDailyLimitAlert();
+      }
+      await _notificationService.cancelDailyLimitAlerts();
+      return;
+    }
+
+    final currentLevelValue = switch (alertLevel) {
+      DailyLimitAlertLevel.eightyPercent => 1,
+      DailyLimitAlertLevel.exceeded => 2,
+    };
+
+    if (storedDay == todayKey && storedLevel == currentLevelValue) {
+      return;
+    }
+
+    if (storedDay == todayKey && storedLevel > currentLevelValue) {
+      await _notificationService.cancelDailyLimitAlerts();
+    }
+
+    await preferences.setString(_dailyLimitAlertDateStorageKey, todayKey);
+    await preferences.setInt(
+      _dailyLimitAlertLevelStorageKey,
+      currentLevelValue,
+    );
+
+    await _notificationService.scheduleDailyLimitAlert(
+      level: alertLevel,
+      total: todayTotal,
+      limit: limit,
+    );
+  }
+
+  Future<void> _resetDailyLimitAlert() async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.remove(_dailyLimitAlertDateStorageKey);
+    await preferences.remove(_dailyLimitAlertLevelStorageKey);
+  }
+
   Future<void> _restorePersistedState() async {
     final preferences = await SharedPreferences.getInstance();
     final storedPresetId = preferences.getString(_themeStorageKey);
@@ -681,11 +787,13 @@ class _ParafixAppState extends State<ParafixApp> {
     final storedMonthlyPayments = preferences.getString(
       _monthlyPaymentsStorageKey,
     );
+    final storedDailyLimit = preferences.getDouble(_dailyLimitStorageKey);
     final hasExistingState =
         storedPresetId != null ||
         storedCustomCategories != null ||
         storedEntries != null ||
-        storedMonthlyPayments != null;
+        storedMonthlyPayments != null ||
+        storedDailyLimit != null;
     final storedHasSeenOnboarding =
         preferences.getBool(_onboardingStorageKey) ?? hasExistingState;
 
@@ -772,7 +880,14 @@ class _ParafixAppState extends State<ParafixApp> {
         _entriesNotifier.value = nextEntries;
       }
       _monthlyPaymentsNotifier.value = nextMonthlyPayments;
+      _dailyLimitNotifier.value = storedDailyLimit;
     });
+    unawaited(
+      _notificationService.scheduleMonthlyPayments(
+        nextMonthlyPayments,
+        requestPermission: false,
+      ),
+    );
   }
 
   void _finishLaunchAnimation() {
@@ -816,6 +931,13 @@ class _ParafixAppState extends State<ParafixApp> {
             .toList(),
       ),
     );
+
+    final dailyLimit = _dailyLimitNotifier.value;
+    if (dailyLimit == null) {
+      await preferences.remove(_dailyLimitStorageKey);
+    } else {
+      await preferences.setDouble(_dailyLimitStorageKey, dailyLimit);
+    }
   }
 
   List<ExpenseCategory> _normalizeCustomCategories(
@@ -878,6 +1000,18 @@ class _ParafixAppState extends State<ParafixApp> {
       '16',
       '17',
       '18',
+      'screenshot-expense-001',
+      'screenshot-expense-002',
+      'screenshot-expense-003',
+      'screenshot-expense-004',
+      'screenshot-expense-005',
+      'screenshot-expense-006',
+      'screenshot-expense-007',
+      'screenshot-expense-008',
+      'screenshot-expense-009',
+      'screenshot-expense-010',
+      'screenshot-expense-011',
+      'screenshot-expense-012',
     };
 
     return entries.isNotEmpty &&
@@ -885,7 +1019,16 @@ class _ParafixAppState extends State<ParafixApp> {
   }
 
   bool _isScreenshotSeedPayments(List<MonthlyPayment> payments) {
-    const seedPaymentIds = {'monthly-1', 'monthly-2', 'monthly-3', 'monthly-4'};
+    const seedPaymentIds = {
+      'monthly-1',
+      'monthly-2',
+      'monthly-3',
+      'monthly-4',
+      'screenshot-monthly-001',
+      'screenshot-monthly-002',
+      'screenshot-monthly-003',
+      'screenshot-monthly-004',
+    };
 
     return payments.isNotEmpty &&
         payments.every((payment) => seedPaymentIds.contains(payment.id));
@@ -917,12 +1060,24 @@ class _ParafixAppState extends State<ParafixApp> {
         '${date.day.toString().padLeft(2, '0')}';
   }
 
+  String _dateKey(DateTime date) {
+    return '${date.year}-'
+        '${date.month.toString().padLeft(2, '0')}-'
+        '${date.day.toString().padLeft(2, '0')}';
+  }
+
   String _formatExportAmount(double amount) {
     if (amount == amount.roundToDouble()) {
       return amount.toStringAsFixed(0);
     }
 
     return amount.toStringAsFixed(2);
+  }
+
+  bool _sameDay(DateTime left, DateTime right) {
+    return left.year == right.year &&
+        left.month == right.month &&
+        left.day == right.day;
   }
 
   void _showFeedback(String message) {

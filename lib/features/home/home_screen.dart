@@ -9,12 +9,14 @@ class HomeScreen extends StatelessWidget {
   const HomeScreen({
     super.key,
     required this.entries,
+    required this.dailyLimit,
     required this.accentColor,
     required this.onDeleteEntry,
     required this.onEditEntry,
   });
 
   final List<ExpenseEntry> entries;
+  final double? dailyLimit;
   final Color accentColor;
   final ValueChanged<ExpenseEntry> onDeleteEntry;
   final Future<ExpenseEntry?> Function(ExpenseEntry) onEditEntry;
@@ -45,6 +47,7 @@ class HomeScreen extends StatelessWidget {
             topEntry: todayTopEntry,
             accentColor: accentColor,
             dailyAverage: activeDayAverage,
+            dailyLimit: dailyLimit,
           ),
           if (entries.isEmpty) ...[
             const SizedBox(height: 18),
@@ -797,6 +800,7 @@ class _SummaryHero extends StatelessWidget {
     required this.topEntry,
     required this.accentColor,
     required this.dailyAverage,
+    required this.dailyLimit,
   });
 
   final double todayTotal;
@@ -804,6 +808,7 @@ class _SummaryHero extends StatelessWidget {
   final ExpenseEntry? topEntry;
   final Color accentColor;
   final double dailyAverage;
+  final double? dailyLimit;
 
   static const double horizontalPadding = 24;
   static const double topBottomPadding = 24;
@@ -905,8 +910,75 @@ class _SummaryHero extends StatelessWidget {
               ),
             ],
           ),
+          if (dailyLimit != null) ...[
+            const SizedBox(height: 18),
+            _DailyLimitStrip(
+              todayTotal: todayTotal,
+              dailyLimit: dailyLimit!,
+              foregroundColor: heroForeground,
+              mutedColor: heroMuted,
+            ),
+          ],
         ],
       ),
+    );
+  }
+}
+
+class _DailyLimitStrip extends StatelessWidget {
+  const _DailyLimitStrip({
+    required this.todayTotal,
+    required this.dailyLimit,
+    required this.foregroundColor,
+    required this.mutedColor,
+  });
+
+  final double todayTotal;
+  final double dailyLimit;
+  final Color foregroundColor;
+  final Color mutedColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final progress = dailyLimit <= 0 ? 0.0 : todayTotal / dailyLimit;
+    final isExceeded = progress >= 1;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Text(
+              isExceeded ? 'Limit aşıldı' : 'Günlük limit',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: isExceeded ? const Color(0xFFFFD0D6) : mutedColor,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const Spacer(),
+            _ScaledText(
+              text: '${_money(todayTotal)} / ${_money(dailyLimit)}',
+              alignment: Alignment.centerRight,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: foregroundColor,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(999),
+          child: LinearProgressIndicator(
+            minHeight: 8,
+            value: progress.clamp(0.0, 1.0).toDouble(),
+            backgroundColor: foregroundColor.withValues(alpha: 0.18),
+            valueColor: AlwaysStoppedAnimation(
+              isExceeded ? const Color(0xFFFFD0D6) : foregroundColor,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

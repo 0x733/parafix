@@ -12,7 +12,9 @@ class PersonalizationSheet extends StatefulWidget {
     required this.selectedPreset,
     required this.categories,
     required this.customCount,
+    required this.dailyLimit,
     required this.onPresetSelected,
+    required this.onDailyLimitChanged,
     required this.onExportExpenses,
     required this.onExportMonthlyPayments,
   });
@@ -22,7 +24,9 @@ class PersonalizationSheet extends StatefulWidget {
   final ParafixThemePreset selectedPreset;
   final List<ExpenseCategory> categories;
   final int customCount;
+  final double? dailyLimit;
   final ValueChanged<ParafixThemePreset> onPresetSelected;
+  final ValueChanged<double?> onDailyLimitChanged;
   final VoidCallback onExportExpenses;
   final VoidCallback onExportMonthlyPayments;
 
@@ -50,6 +54,13 @@ class _PersonalizationSheetState extends State<PersonalizationSheet> {
   IconData _selectedIcon = Icons.local_cafe_rounded;
   Color _selectedColor = const Color(0xFFBF5B48);
   ExpenseCategory? _editingCategory;
+  double? _dailyLimit;
+
+  @override
+  void initState() {
+    super.initState();
+    _dailyLimit = widget.dailyLimit;
+  }
 
   @override
   void dispose() {
@@ -343,6 +354,21 @@ class _PersonalizationSheetState extends State<PersonalizationSheet> {
                   ),
                 ],
                 const SizedBox(height: 26),
+                Text(
+                  'Hatırlatmalar',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Günlük limit ve ödeme hatırlatmaları cihazında çalışır.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                const SizedBox(height: 12),
+                _DailyLimitTile(
+                  limit: _dailyLimit,
+                  onTap: _openDailyLimitEditor,
+                ),
+                const SizedBox(height: 26),
                 Text('Veriler', style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 4),
                 Text(
@@ -422,6 +448,226 @@ class _PersonalizationSheetState extends State<PersonalizationSheet> {
       _selectedColor = _colors.first;
     });
   }
+
+  Future<void> _openDailyLimitEditor() async {
+    final result = await showModalBottomSheet<_DailyLimitEditorResult>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => _DailyLimitEditorSheet(initialLimit: _dailyLimit),
+    );
+
+    if (result == null || !mounted) {
+      return;
+    }
+
+    setState(() => _dailyLimit = result.limit);
+    widget.onDailyLimitChanged(result.limit);
+  }
+}
+
+class _DailyLimitTile extends StatelessWidget {
+  const _DailyLimitTile({required this.limit, required this.onTap});
+
+  final double? limit;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = Theme.of(context).extension<ParafixPalette>()!;
+    final isActive = limit != null;
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(18),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+        decoration: BoxDecoration(
+          color: palette.surfaceAlt.withValues(alpha: 0.48),
+          borderRadius: BorderRadius.circular(18),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: palette.accent.withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(13),
+              ),
+              child: Icon(
+                Icons.notifications_active_rounded,
+                color: palette.accent,
+                size: 21,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Günlük harcama limiti',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    isActive
+                        ? '${_money(limit!)} • %80 ve aşımda uyarır'
+                        : 'Kapalı • İstersen tek limit belirle.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right_rounded, color: palette.mutedText),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DailyLimitEditorSheet extends StatefulWidget {
+  const _DailyLimitEditorSheet({required this.initialLimit});
+
+  final double? initialLimit;
+
+  @override
+  State<_DailyLimitEditorSheet> createState() => _DailyLimitEditorSheetState();
+}
+
+class _DailyLimitEditorSheetState extends State<_DailyLimitEditorSheet> {
+  late final TextEditingController _controller;
+
+  bool get _canSave {
+    final amount = int.tryParse(_controller.text);
+    return amount != null && amount > 0;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(
+      text: widget.initialLimit == null
+          ? ''
+          : widget.initialLimit!.toStringAsFixed(0),
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = Theme.of(context).extension<ParafixPalette>()!;
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
+      child: Container(
+        decoration: BoxDecoration(
+          color: palette.surface,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
+        ),
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(20, 12, 20, bottomInset + 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const SizedBox(height: 14),
+              Center(
+                child: Container(
+                  width: 48,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: palette.border,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 18),
+              Text(
+                'Günlük limit',
+                style: Theme.of(context).textTheme.headlineMedium,
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Bugünkü harcama limitin %80’e geldiğinde ve limiti aştığında uyarı alırsın.',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              const SizedBox(height: 18),
+              TextField(
+                controller: _controller,
+                autofocus: true,
+                keyboardType: TextInputType.number,
+                textInputAction: TextInputAction.done,
+                inputFormatters: [
+                  FilteringTextInputFormatter.digitsOnly,
+                  LengthLimitingTextInputFormatter(8),
+                ],
+                style: Theme.of(context).textTheme.headlineMedium,
+                decoration: const InputDecoration(
+                  labelText: 'Limit',
+                  hintText: '1000',
+                  suffixText: '₺',
+                ),
+                onSubmitted: (_) => _submit(),
+                onChanged: (_) => setState(() {}),
+              ),
+              const SizedBox(height: 14),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: _canSave ? _submit : null,
+                  child: const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 14),
+                    child: Text('Kaydet'),
+                  ),
+                ),
+              ),
+              if (widget.initialLimit != null) ...[
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: TextButton(
+                    onPressed: () => Navigator.of(
+                      context,
+                    ).pop(const _DailyLimitEditorResult(null)),
+                    child: const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 8),
+                      child: Text('Limiti kapat'),
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _submit() {
+    final amount = int.tryParse(_controller.text);
+    if (amount == null || amount <= 0) {
+      return;
+    }
+
+    Navigator.of(context).pop(_DailyLimitEditorResult(amount.toDouble()));
+  }
+}
+
+class _DailyLimitEditorResult {
+  const _DailyLimitEditorResult(this.limit);
+
+  final double? limit;
 }
 
 class _ExportActionTile extends StatelessWidget {
@@ -519,4 +765,8 @@ String _themeSubtitle(String id) {
     default:
       return '';
   }
+}
+
+String _money(double amount) {
+  return '${amount.round()}₺';
 }
