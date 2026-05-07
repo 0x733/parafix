@@ -4,17 +4,20 @@ import 'package:image_picker/image_picker.dart';
 
 import '../../core/theme/parafix_theme.dart';
 import '../../models/expense_category.dart';
+import '../../services/category_learning_service.dart';
 import '../../services/receipt_scan_service.dart';
 
 class AddExpenseSheet extends StatefulWidget {
   const AddExpenseSheet({
     super.key,
     required this.categories,
+    required this.categoryLearning,
     this.initialEntry,
     this.scrollController,
   });
 
   final List<ExpenseCategory> categories;
+  final CategoryLearningSnapshot categoryLearning;
   final ExpenseDraft? initialEntry;
   final ScrollController? scrollController;
 
@@ -34,6 +37,8 @@ class _AddExpenseSheetState extends State<AddExpenseSheet> {
   String? _receiptScanMessage;
   var _receiptScanSucceeded = false;
   var _isScanningReceipt = false;
+  var _hasUserPickedCategory = false;
+  var _isUpdatingTitleProgrammatically = false;
 
   bool get _isFormValid {
     final amount = int.tryParse(_amountController.text);
@@ -50,6 +55,7 @@ class _AddExpenseSheetState extends State<AddExpenseSheet> {
     final initialEntry = widget.initialEntry;
     final now = DateTime.now();
     _selectedCategory = initialEntry?.category ?? _displayedCategories.first;
+    _hasUserPickedCategory = initialEntry != null;
     final initialDate = initialEntry?.date ?? now;
     _selectedDate = initialDate.isAfter(now) ? now : initialDate;
     _titleController.text = initialEntry?.title ?? '';
@@ -57,10 +63,12 @@ class _AddExpenseSheetState extends State<AddExpenseSheet> {
         ? ''
         : initialEntry.amount.toStringAsFixed(0);
     _noteController.text = initialEntry?.note ?? '';
+    _titleController.addListener(_handleTitleChanged);
   }
 
   @override
   void dispose() {
+    _titleController.removeListener(_handleTitleChanged);
     _titleController.dispose();
     _amountController.dispose();
     _noteController.dispose();
@@ -180,7 +188,11 @@ class _AddExpenseSheetState extends State<AddExpenseSheet> {
                       onFieldSubmitted: (_) =>
                           FocusScope.of(context).nextFocus(),
                       inputFormatters: const [_AmountInputFormatter()],
-                      style: Theme.of(context).textTheme.headlineSmall,
+                      style: Theme.of(context).textTheme.headlineLarge
+                          ?.copyWith(
+                            fontWeight: FontWeight.w400,
+                            letterSpacing: -0.8,
+                          ),
                       decoration: const InputDecoration(
                         labelText: 'Tutar',
                         hintText: '0',
@@ -230,8 +242,10 @@ class _AddExpenseSheetState extends State<AddExpenseSheet> {
                           (category) => _CategoryChip(
                             category: category,
                             selected: _selectedCategory.id == category.id,
-                            onSelected: () =>
-                                setState(() => _selectedCategory = category),
+                            onSelected: () => setState(() {
+                              _hasUserPickedCategory = true;
+                              _selectedCategory = category;
+                            }),
                           ),
                         )
                         .toList(),
@@ -413,10 +427,14 @@ class _AddExpenseSheetState extends State<AddExpenseSheet> {
 
     final title = result.title;
     if (title != null && title.trim().isNotEmpty) {
+      _isUpdatingTitleProgrammatically = true;
       _titleController.text = title.trim();
+      _isUpdatingTitleProgrammatically = false;
     }
 
-    final category = result.category;
+    _hasUserPickedCategory = false;
+    final category =
+        _learnedCategoryFor(_titleController.text.trim()) ?? result.category;
     if (category != null) {
       _selectedCategory = category;
     }
@@ -445,6 +463,37 @@ class _AddExpenseSheetState extends State<AddExpenseSheet> {
         category: _selectedCategory,
       ),
     );
+  }
+
+  void _handleTitleChanged() {
+    if (_isUpdatingTitleProgrammatically || _hasUserPickedCategory) {
+      return;
+    }
+
+    final category = _learnedCategoryFor(_titleController.text);
+    if (category == null || category.id == _selectedCategory.id || !mounted) {
+      return;
+    }
+
+    setState(() => _selectedCategory = category);
+  }
+
+  ExpenseCategory? _learnedCategoryFor(String title) {
+    final categoryId = widget.categoryLearning.suggestCategoryId(
+      title,
+      _displayedCategories.map((category) => category.id),
+    );
+    if (categoryId == null) {
+      return null;
+    }
+
+    for (final category in _displayedCategories) {
+      if (category.id == categoryId) {
+        return category;
+      }
+    }
+
+    return null;
   }
 }
 

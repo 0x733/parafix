@@ -14,25 +14,28 @@ Amacım çok karmaşık bir finans uygulaması yapmak değil. Parafix'in odağı
 ## Neler Var?
 
 - Harcama ekleme, düzenleme ve silme
+- Fiş fotoğrafından hızlı harcama doldurma
 - Ana sayfada bugün, son 7 gün ve bu ay özeti
+- Günlük harcama limiti ve hatırlatmalar
 - Son 7 günlük harcama akışı
 - Gün detay ekranı
 - Rapor ekranında dönem filtreleri
 - Kategori bazlı harcama dağılımı
 - Aylık ödemeler ve abonelik takibi
+- Kullanıma göre kategori önerisi
 - Tema seçimi
 - Özel kategori ekleme
 - Cihaz içinde yerel veri saklama
 
 ## Ekran Görüntüleri
 
-| Ana Sayfa | Rapor ve Aylık Ödemeler |
-| --- | --- |
-| <img src="docs/app-store-screenshots/premium-blue-v2/01-home.png" width="260" alt="Parafix ana sayfa App Store görseli" /> | <img src="docs/app-store-screenshots/premium-blue-v2/02-report-payments.png" width="260" alt="Parafix rapor ve aylık ödemeler App Store görseli" /> |
+| Fiş Tara | Bugünkü Özet | Aylık Ödemeler |
+| --- | --- | --- |
+| <img src="docs/app-store-screenshots/app-store-1.1-marketing/01-fis-tara.png" width="220" alt="Parafix fiş tarama App Store görseli" /> | <img src="docs/app-store-screenshots/app-store-1.1-marketing/02-bugun-limit.png" width="220" alt="Parafix bugünkü özet App Store görseli" /> | <img src="docs/app-store-screenshots/app-store-1.1-marketing/03-aylik-odemeler.png" width="220" alt="Parafix aylık ödemeler App Store görseli" /> |
 
-| Yeni Harcama | Kişiselleştir |
+| Rapor | Kişiselleştir |
 | --- | --- |
-| <img src="docs/app-store-screenshots/premium-blue-v2/03-fast-entry.png" width="260" alt="Parafix yeni harcama App Store görseli" /> | <img src="docs/app-store-screenshots/premium-blue-v2/04-personalization.png" width="260" alt="Parafix kişiselleştirme App Store görseli" /> |
+| <img src="docs/app-store-screenshots/app-store-1.1-marketing/04-rapor.png" width="260" alt="Parafix rapor App Store görseli" /> | <img src="docs/app-store-screenshots/app-store-1.1-marketing/05-kisisellestir.png" width="260" alt="Parafix kişiselleştirme App Store görseli" /> |
 
 ## Teknolojiler
 

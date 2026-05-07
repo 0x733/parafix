@@ -18,6 +18,7 @@ import '../features/settings/personalization_sheet.dart';
 import '../models/expense_category.dart';
 import '../models/expense_entry.dart';
 import '../models/monthly_payment.dart';
+import '../services/category_learning_service.dart';
 import '../services/notification_service.dart';
 
 const _appIconAssetPath =
@@ -48,7 +49,10 @@ class _ParafixAppState extends State<ParafixApp> {
   late final ValueNotifier<List<MonthlyPayment>> _monthlyPaymentsNotifier;
   late final ValueNotifier<double?> _dailyLimitNotifier;
   late final ValueNotifier<int> _tabIndexNotifier;
+  late final CategoryLearningService _categoryLearningService;
   late final ParafixNotificationService _notificationService;
+  CategoryLearningSnapshot _categoryLearningSnapshot =
+      CategoryLearningSnapshot.empty;
   OverlayEntry? _feedbackEntry;
   Timer? _feedbackTimer;
 
@@ -134,6 +138,7 @@ class _ParafixAppState extends State<ParafixApp> {
     _entriesNotifier = ValueNotifier(_seedEntries());
     _monthlyPaymentsNotifier = ValueNotifier(_seedMonthlyPayments());
     _dailyLimitNotifier = ValueNotifier(null);
+    _categoryLearningService = CategoryLearningService();
     _notificationService = ParafixNotificationService();
     unawaited(_notificationService.initialize());
     unawaited(_restorePersistedState());
@@ -329,6 +334,7 @@ class _ParafixAppState extends State<ParafixApp> {
           return AddExpenseSheet(
             scrollController: scrollController,
             categories: _allCategories,
+            categoryLearning: _categoryLearningSnapshot,
             initialEntry: entry == null
                 ? null
                 : ExpenseDraft(
@@ -360,6 +366,7 @@ class _ParafixAppState extends State<ParafixApp> {
       _entriesNotifier.value,
       nextEntry,
     );
+    unawaited(_learnCategoryFromEntry(nextEntry));
     unawaited(_persistState());
     unawaited(HapticFeedback.lightImpact());
 
@@ -777,6 +784,19 @@ class _ParafixAppState extends State<ParafixApp> {
     await preferences.remove(_dailyLimitAlertLevelStorageKey);
   }
 
+  Future<void> _learnCategoryFromEntry(ExpenseEntry entry) async {
+    final snapshot = await _categoryLearningService.learn(
+      title: entry.title,
+      categoryId: entry.category.id,
+    );
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() => _categoryLearningSnapshot = snapshot);
+  }
+
   Future<void> _restorePersistedState() async {
     final preferences = await SharedPreferences.getInstance();
     final storedPresetId = preferences.getString(_themeStorageKey);
@@ -801,6 +821,7 @@ class _ParafixAppState extends State<ParafixApp> {
     var nextCustomCategories = _customCategories;
     List<ExpenseEntry>? nextEntries;
     var nextMonthlyPayments = _monthlyPaymentsNotifier.value;
+    var nextCategoryLearningSnapshot = await _categoryLearningService.load();
 
     if (storedPresetId != null) {
       nextPreset = ParafixTheme.presets.firstWhere(
@@ -842,6 +863,18 @@ class _ParafixAppState extends State<ParafixApp> {
       }
     }
 
+    final restoredEntries = nextEntries ?? _entriesNotifier.value;
+    if (nextCategoryLearningSnapshot.isEmpty && restoredEntries.isNotEmpty) {
+      nextCategoryLearningSnapshot = await _categoryLearningService.learnMany(
+        restoredEntries.map(
+          (entry) => CategoryLearningSample(
+            title: entry.title,
+            categoryId: entry.category.id,
+          ),
+        ),
+      );
+    }
+
     if (storedMonthlyPayments != null) {
       final categoriesById = {
         for (final category in [..._coreCategories, ...nextCustomCategories])
@@ -881,6 +914,7 @@ class _ParafixAppState extends State<ParafixApp> {
       }
       _monthlyPaymentsNotifier.value = nextMonthlyPayments;
       _dailyLimitNotifier.value = storedDailyLimit;
+      _categoryLearningSnapshot = nextCategoryLearningSnapshot;
     });
     unawaited(
       _notificationService.scheduleMonthlyPayments(
